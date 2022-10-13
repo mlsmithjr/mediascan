@@ -3,13 +3,57 @@
 import json
 import subprocess
 import os
-import sqlite3
 import sys
+from sqlalchemy import Column, ForeignKey, Integer, String, Float
+from sqlalchemy.orm import declarative_base
+from sqlalchemy import create_engine
+from sqlalchemy import select
+from sqlalchemy.orm import Session, relationship
 from typing import Optional, Dict
 
 EXTENSIONS = [".mkv", ".mp4", ".avi", ".m4v"]
 
 FFPROBE_PATH="/usr/bin/ffprobe"
+
+Base = declarative_base()
+
+class Item(Base):
+    __tablename__ = "item"
+    id = Column(Integer, primary_key=True)
+    filename = Column(String, nullable=False, index=True)
+    filepath = Column(String, nullable=False, index=True)
+    vcodec = Column(String, nullable=False)
+    filesize_mb = Column(Integer)
+    height = Column(Integer)
+    width = Column(Integer)
+    duration = Column(Integer)
+    tps = Column(String)
+    color_space = Column(String)
+    pix_format = Column(String)
+    last_modified = Column(Float)
+    
+    audio = relationship("Audio", back_populates="item", cascade="all, merge, delete-orphan")
+    subtitle = relationship("Subtitle", back_populates="item", cascade="all, merge, delete-orphan")
+    
+class Audio(Base):
+    __tablename__ = "audio"
+    id = Column(Integer, primary_key=True)
+    itemid = Column(Integer, ForeignKey("item.id"), nullable=False)
+    lang = Column(String, index=True)
+    codec = Column(String, index=True)
+    channel_layout = Column(String)
+    isdefault = Column(Integer)
+    item = relationship("Item")
+
+class Subtitle(Base):
+    __tablename__ = "subtitle"
+    id = Column(Integer, primary_key=True)
+    itemid = Column(Integer, ForeignKey("item.id"), nullable=False)
+    lang = Column(String, index=True)
+    format = Column(String)
+    isdefault = Column(Integer)
+    item = relationship("Item")
+
 
 
 class MediaInfo:
@@ -137,6 +181,67 @@ def getinfo(filepath: str):
         return parse_ffmpeg_details_json(filepath, info)
 
 
+def store(root: str, filename: str, info: MediaInfo):
+    global session
+
+    audio = info.audio
+    if not audio:
+        print(f"Skipping {info.path} due to missing audio track")
+    else:
+        itemid = -1
+        p = os.path.join(root, filename)
+        if p in existing_files:
+            itemid = existing_files[p]["id"]
+        if itemid != -1:
+            item = session.get(Item, itemid)
+            item.audio.delete()
+            item.subtitle.delete()
+            session.flush()
+
+            item.vcodec = info.vcodec
+            item.height = info.res_height
+            item.width = info.res_width
+            item.filesize_mb = info.filesize_mb
+            item.fps = info.fps
+            item.color_space = info.color_space
+            item.pix_format = info.pix_fmt
+            item.duration = info.runtime
+            item.last_modified = os.path.getmtime(p)
+            session.update(item)
+            
+        else:
+            item = Item()
+            item.filename = filename
+            item.filepath = root
+            item.vcodec = info.vcodec
+            item.height = info.res_height
+            item.width = info.res_width
+            item.filesize_mb = info.filesize_mb
+            item.fps = info.fps
+            item.color_space = info.color_space
+            item.pix_format = info.pix_fmt
+            item.duration = info.runtime
+            item.last_modified = os.path.getmtime(p)
+            session.add(item)
+
+        session.flush()
+
+        # make sure there is always a default audio track
+        if len(audio) == 1:
+            audio[0]['default'] = 1
+
+        for a in audio:
+            a = Audio(lang=a['lang'], codec=a['format'], channel_layout=a['channel_layout'], isdefault=a['default'])
+            item.audio.append(a)
+
+        for s in info.subtitle:
+            s = Subtitle(lang=s['lang'], format=s['format'], isdefault=s['default'])
+            item.subtitle.append(s)
+
+#        session.merge(item)
+        session.flush()
+
+
 def update_db(root:str, filename: str, info: MediaInfo):
     global cur
 
@@ -196,23 +301,23 @@ def dig(start: str):
                         # make sure it was changed before we reprocess
 
                         last_mod = os.path.getmtime(p)
-                        db_last_mod = existing_files[p]["last_mod"]
+                        db_last_mod = existing_files[p].last_modified
                         if last_mod == db_last_mod:
                             continue
                     
                     info = getinfo(p)
                     if info.valid:
                         print(f"  {file}")
-                        update_db(root, file, info)
+                        store(root, file, info)
                 except Exception as ex:
                     print(" " + os.path.join(root, file))
                     raise ex
                 
-        con.commit()
+        session.commit()
 
 if __name__ == "__main__":
 
-    global con, cur, existing_files, mode
+    global engine, session, existing_files, mode
 
     mode = "add"
 
@@ -221,26 +326,30 @@ if __name__ == "__main__":
             mode = "refresh"
             print("running in refresh mode")
 
-    con = sqlite3.connect("mediascan.db")
-    cur = con.cursor()
-    
-    # load all existing files and database IDs in advance to speed things up
-    existing_files = {}
-    results = cur.execute("select id, filename, filepath, last_modified from item")
-    for result in results:
-        id, filename, filepath, last_mod = result
-        existing_files[os.path.join(filepath, filename)] =  { "id":id, "last_mod":last_mod } 
-    
-    for start in ["/mnt/merger/media/video/Television", "/mnt/merger/media/video/Mark", "/mnt/merger/media/video/Movies", "/mnt/merger/media/video/anime/movies", "/mnt/merger/media/video/kaiju"]:
-        dig(start)
+#    engine = create_engine("sqlite:///mediascan.db", echo=False, future=True)
+    engine = create_engine("postgresql+pg8000://mark:weroiu20@homeserver/mediascan", echo=False, future=True)
+    Base.metadata.create_all(engine)
 
-    # finally, purge any files no longer on disk but in the database
-    for p in existing_files.keys():
-       if not os.path.exists(p):
-           cur.execute("delete from item where id=?", (existing_files[p]["id"],))
-           print(f"removed {p}")
+    with Session(engine) as session:
+    
+        # load all existing files and database IDs in advance to speed things up
+        existing_files = dict()
+        stmt = select(Item)
+        results = session.scalars(stmt)
+        for result in results:
+            existing_files[os.path.join(result.filepath, result.filename)] =  result
+        
+        for start in ["/mnt/merger/media/video/Mark", "/mnt/merger/media/video/Movies", "/mnt/merger/media/video/anime/movies"]: #, "/mnt/merger/media/video/kaiju", "/mnt/merger/media/video/Television"]:
+            dig(start)
 
-    con.commit()
-    con.close()
+        # finally, purge any files no longer on disk but in the database
+        for p in existing_files.keys():
+            if not os.path.exists(p):
+                session.get(existing_files[p]["id"]).delete()
+                print(f"removed {p}")
+
+        session.commit()
+    
+    engine.dispose()
 
 
