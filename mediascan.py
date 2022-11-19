@@ -1,21 +1,66 @@
 #!python3
 
+import datetime
 import json
 import subprocess
 import os
 import sys
-from sqlalchemy import Column, ForeignKey, Integer, String, Float
+import re
+import timeit
+from jsonschema import validate
+from functools import cache
+from sqlalchemy import Column, ForeignKey, Integer, String, DateTime
+import sqlalchemy
 from sqlalchemy.orm import declarative_base
 from sqlalchemy import create_engine
 from sqlalchemy import select
 from sqlalchemy.orm import Session, relationship
 from typing import Optional, Dict
 
+
 EXTENSIONS = [".mkv", ".mp4", ".avi", ".m4v"]
 
 FFPROBE_PATH="/usr/bin/ffprobe"
 
 Base = declarative_base()
+
+SERIES_REGEX = re.compile(r"(.*)\.S(\d+)E(\d+)")
+
+CONFIG_SCHEMA = {
+  "type": "object",
+  "properties": {
+    "paths": {
+        "type": "array",
+        "items": {
+            "type": "object",
+            "required": [ "path" ],
+            "properties": {
+                "path": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                }
+            }
+      }
+    },
+    "database": {
+      "type": "array",
+      "items": {
+          "type": "object",
+          "required": [ "connect" ],
+          "properties": {
+              "connect": {
+                  "type": "string"
+              },
+              "enabled": {
+                  "type": "boolean"
+              }
+          }
+      }
+    }
+  }
+}
 
 class Item(Base):
     __tablename__ = "item"
@@ -27,10 +72,11 @@ class Item(Base):
     height = Column(Integer)
     width = Column(Integer)
     duration = Column(Integer)
-    tps = Column(String)
+    fps = Column(String)
     color_space = Column(String)
     pix_format = Column(String)
-    last_modified = Column(Float)
+    last_modified = Column(DateTime)
+    tag = Column(String)
     
     audio = relationship("Audio", back_populates="item", cascade="all, merge, delete-orphan")
     subtitle = relationship("Subtitle", back_populates="item", cascade="all, merge, delete-orphan")
@@ -43,7 +89,7 @@ class Audio(Base):
     codec = Column(String, index=True)
     channel_layout = Column(String)
     isdefault = Column(Integer)
-    item = relationship("Item")
+    item = relationship("Item", back_populates="audio")
 
 class Subtitle(Base):
     __tablename__ = "subtitle"
@@ -52,7 +98,7 @@ class Subtitle(Base):
     lang = Column(String, index=True)
     format = Column(String)
     isdefault = Column(Integer)
-    item = relationship("Item")
+    item = relationship("Item", back_populates="subtitle")
 
 
 
@@ -94,6 +140,149 @@ class MediaInfo:
     def __repr__(self):
         return f"{self.path}, {self.vcodec=}, {self.stream=}, {self.res_width}x{self.res_height}, {self.runtime_str()=}, {self.audio=}"
 
+
+def get_filemodtime(p : str):
+    mtime = os.path.getmtime(p)
+    return datetime.datetime.fromtimestamp(mtime)
+
+
+def getinfo(filepath: str):
+    args = [FFPROBE_PATH, '-v', '1', '-show_streams', '-print_format', 'json', '-i', filepath]
+    with subprocess.Popen(args, stdout=subprocess.PIPE) as proc:
+        output = proc.stdout.read().decode(encoding='utf8')
+        info = json.loads(output)
+        return parse_ffmpeg_details_json(filepath, info)
+
+@cache
+def compiled_pattern(pattern: str) -> Optional[re.Pattern]:
+    r = re.compile(pattern)
+    return r
+
+def match_tag(p: str, path: Dict):
+
+    if "tags" not in path:
+        return None
+
+    for tag in path.get("tags"):
+        r = compiled_pattern(tag["pattern"])
+        if r.match(p):
+            return tag["tag"]
+    return None
+
+def store(root: str, filename: str, info: MediaInfo, path: Dict):
+    global session
+
+    audio = info.audio
+    if not audio:
+        print(f"Skipping {info.path} due to missing audio track")
+    else:
+        itemid = -1
+        p = os.path.join(root, filename)
+        if p in existing_files:
+            itemid = existing_files[p].id
+        if itemid != -1:
+            item = session.get(Item, itemid)
+            item.audio.clear()
+            item.subtitle.clear()
+            session.flush()
+
+            item.vcodec = info.vcodec
+            item.height = info.res_height
+            item.width = info.res_width
+            item.filesize_mb = info.filesize_mb
+            item.fps = info.fps
+            item.color_space = info.color_space
+            item.pix_format = info.pix_fmt
+            item.duration = info.runtime
+            item.last_modified = get_filemodtime(p)
+            item.tag = match_tag(p, path)
+            
+        else:
+            item = Item()
+            item.filename = filename
+            item.filepath = root
+            item.vcodec = info.vcodec
+            item.height = info.res_height
+            item.width = info.res_width
+            item.filesize_mb = info.filesize_mb
+            item.fps = info.fps
+            item.color_space = info.color_space
+            item.pix_format = info.pix_fmt
+            item.duration = info.runtime
+            item.last_modified = get_filemodtime(p)
+            item.tag = match_tag(p, path)
+            session.add(item)
+
+        session.flush()
+
+        # make sure there is always a default audio track
+        if len(audio) == 1:
+            audio[0]['default'] = 1
+
+        for a in audio:
+            a = Audio(lang=a['lang'], codec=a['format'], channel_layout=a['channel_layout'], isdefault=a['default'])
+            item.audio.append(a)
+
+        for s in info.subtitle:
+            s = Subtitle(lang=s['lang'], format=s['format'], isdefault=s['default'])
+            item.subtitle.append(s)
+
+#        session.merge(item)
+        session.flush()
+
+
+def dig(path: Dict):
+    global mode
+
+    root = path["path"]
+    reference_file = None
+    file_filter_list = list()
+    result = session.query(sqlalchemy.func.max(Item.last_modified)).filter(Item.filepath.startswith(root)).one()
+    max_ts = result[0]
+    if max_ts is None:
+        max_ts = datetime.datetime.DateTime(1970, 1, 1, 0, 0, 0)
+    else:
+        result = session.query(Item).filter(Item.last_modified.__eq__(max_ts)).first()
+        reference_file = os.path.join(result.filepath, result.filename) 
+
+    if reference_file:
+        # find all files modified/added since max_ts
+        find_args = ["find", root, "-newer", reference_file]
+        with subprocess.Popen(find_args, stdout=subprocess.PIPE) as proc:
+            lines = proc.stdout.readlines()
+            filelist = [line.decode('utf-8').strip() for line in lines]
+
+    for file in filelist:
+#    for root, subdir, files in os.walk(root):
+#        for file in files:
+        if file.startswith(".") or file.startswith("._") or os.path.isdir(file):
+            continue
+        if file[-4:] in EXTENSIONS:
+            try:
+                p = os.path.join(root, file)
+                
+                if len(filelist) > 0 and p not in filelist:
+                    continue
+
+                if p in existing_files:
+
+                    # make sure it was changed before we reprocess
+
+                    last_mod = get_filemodtime(p)
+                    db_last_mod = existing_files[p].last_modified
+                    if last_mod == db_last_mod:
+                        continue
+                
+                info = getinfo(p)
+                if info.valid:
+                    print(f"  {file}")
+                    store(os.path.dirname(file), os.path.basename(file), info, path)
+            except Exception as ex:
+#                print(" " + os.path.join(root, file))
+                print(file)
+                raise ex
+                
+    session.commit()
 
 def parse_ffmpeg_details_json(_path, info):
     minone = MediaInfo(None)
@@ -173,148 +362,6 @@ def parse_ffmpeg_details_json(_path, info):
     return MediaInfo(minfo)
 
 
-def getinfo(filepath: str):
-    args = [FFPROBE_PATH, '-v', '1', '-show_streams', '-print_format', 'json', '-i', filepath]
-    with subprocess.Popen(args, stdout=subprocess.PIPE) as proc:
-        output = proc.stdout.read().decode(encoding='utf8')
-        info = json.loads(output)
-        return parse_ffmpeg_details_json(filepath, info)
-
-
-def store(root: str, filename: str, info: MediaInfo):
-    global session
-
-    audio = info.audio
-    if not audio:
-        print(f"Skipping {info.path} due to missing audio track")
-    else:
-        itemid = -1
-        p = os.path.join(root, filename)
-        if p in existing_files:
-            itemid = existing_files[p]["id"]
-        if itemid != -1:
-            item = session.get(Item, itemid)
-            item.audio.delete()
-            item.subtitle.delete()
-            session.flush()
-
-            item.vcodec = info.vcodec
-            item.height = info.res_height
-            item.width = info.res_width
-            item.filesize_mb = info.filesize_mb
-            item.fps = info.fps
-            item.color_space = info.color_space
-            item.pix_format = info.pix_fmt
-            item.duration = info.runtime
-            item.last_modified = os.path.getmtime(p)
-            session.update(item)
-            
-        else:
-            item = Item()
-            item.filename = filename
-            item.filepath = root
-            item.vcodec = info.vcodec
-            item.height = info.res_height
-            item.width = info.res_width
-            item.filesize_mb = info.filesize_mb
-            item.fps = info.fps
-            item.color_space = info.color_space
-            item.pix_format = info.pix_fmt
-            item.duration = info.runtime
-            item.last_modified = os.path.getmtime(p)
-            session.add(item)
-
-        session.flush()
-
-        # make sure there is always a default audio track
-        if len(audio) == 1:
-            audio[0]['default'] = 1
-
-        for a in audio:
-            a = Audio(lang=a['lang'], codec=a['format'], channel_layout=a['channel_layout'], isdefault=a['default'])
-            item.audio.append(a)
-
-        for s in info.subtitle:
-            s = Subtitle(lang=s['lang'], format=s['format'], isdefault=s['default'])
-            item.subtitle.append(s)
-
-#        session.merge(item)
-        session.flush()
-
-
-def update_db(root:str, filename: str, info: MediaInfo):
-    global cur
-
-    audio = info.audio
-    if not audio:
-        print(f"Skipping {info.path} due to missing audio track")
-    else:
-        itemid = -1
-        p = os.path.join(root, filename)
-        if p in existing_files:
-            itemid = existing_files[p]["id"]
-        if itemid != -1:
-            cur.execute("delete from audio where itemid = ?", (itemid,))
-            cur.execute("delete from subtitle where itemid = ?", (itemid,))
-
-            x = cur.execute("update item set filename=?, filepath=?, vcodec=?, height=?, width=?, filesize_mb=?, fps=?, color_space=?, pix_format=?, duration=?, last_modified=? "
-                        "where id = ?", 
-                (filename, root, info.vcodec, info.res_height, info.res_width, info.filesize_mb, info.fps, info.color_space, info.pix_fmt, info.runtime, os.path.getmtime(p), itemid))
-        else:
-            cur.execute("insert into item ('filename','filepath','vcodec','height','width','filesize_mb','fps','color_space','pix_format','duration','last_modified') "
-                        "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", 
-                (filename, root, info.vcodec, info.res_height, info.res_width, info.filesize_mb, info.fps, info.color_space, info.pix_fmt, info.runtime, os.path.getmtime(p)))
-            itemid = cur.lastrowid
-        segments = []
-
-        # make sure there is always a default audio track
-        if len(audio) == 1:
-            audio[0]['default'] = 1
-
-        for a in audio:
-            a = (itemid, a['lang'], a['format'], a['channel_layout'], a['default'])
-            segments.append(a)
-        cur.executemany("insert into audio ('itemid','lang','codec','channel_layout','isdefault') values (?,?, ?, ?, ?)", segments)
-
-        segments = []
-        for s in info.subtitle:
-            s = (itemid, s['lang'], s['format'], s['default'])
-            segments.append(s)
-        cur.executemany("insert into subtitle ('itemid','lang','format','isdefault') values (?, ?, ?, ?)", segments)
-
-
-
-def dig(start: str):
-    global mode
-
-    for root, _, files in os.walk(start):
-#        print(root)
-        for file in files:
-            if file.startswith("."):
-                continue
-            if file[-4:] in EXTENSIONS:
-                try:
-                    p = os.path.join(root, file)
-                    
-                    if p in existing_files:
-
-                        # make sure it was changed before we reprocess
-
-                        last_mod = os.path.getmtime(p)
-                        db_last_mod = existing_files[p].last_modified
-                        if last_mod == db_last_mod:
-                            continue
-                    
-                    info = getinfo(p)
-                    if info.valid:
-                        print(f"  {file}")
-                        store(root, file, info)
-                except Exception as ex:
-                    print(" " + os.path.join(root, file))
-                    raise ex
-                
-        session.commit()
-
 if __name__ == "__main__":
 
     global engine, session, existing_files, mode
@@ -326,26 +373,60 @@ if __name__ == "__main__":
             mode = "refresh"
             print("running in refresh mode")
 
-#    engine = create_engine("sqlite:///mediascan.db", echo=False, future=True)
-    engine = create_engine("postgresql+pg8000://mark:weroiu20@homeserver/mediascan", echo=False, future=True)
+    ##
+    # load configuration and validate
+    #
+    with open("mediascan.json", "r") as f:
+        config = json.load(f)
+
+    try:
+        validate(config, CONFIG_SCHEMA)
+    except Exception as ex:
+        print("There is a problem with the configuration file...")
+        print(str(ex))
+        sys.exit(1)
+
+    for db in config["database"]:
+        if db.get("enabled", True):
+            db_url = db["connect"]
+            break
+    else:
+        print("No enabled database configured")
+        sys.exit(0)
+
+    paths = config.get("paths", [])
+    if len(paths) == 0:
+        print("No paths defined to scan")
+        sys.exit(0)
+        
+    ##
+    # connect to database and create tables, if missing
+    #
+    engine = create_engine(db_url, echo=False, future=True)
     Base.metadata.create_all(engine)
 
     with Session(engine) as session:
     
-        # load all existing files and database IDs in advance to speed things up
-        existing_files = dict()
-        stmt = select(Item)
-        results = session.scalars(stmt)
-        for result in results:
-            existing_files[os.path.join(result.filepath, result.filename)] =  result
+        if mode == "refresh":
+            # force everything to re-parse
+            existing_files = dict()
+        else:
+            # load all existing files and database IDs in advance to speed things up
+            existing_files = dict()
+            stmt = select(Item)
+            results = session.scalars(stmt)
+            for result in results:
+                existing_files[os.path.join(result.filepath, result.filename)] =  result
         
-        for start in ["/mnt/merger/media/video/Mark", "/mnt/merger/media/video/Movies", "/mnt/merger/media/video/anime/movies"]: #, "/mnt/merger/media/video/kaiju", "/mnt/merger/media/video/Television"]:
-            dig(start)
+        for path in paths:
+            if path.get("enabled", True):
+                print(path["path"])
+                dig(path)
 
         # finally, purge any files no longer on disk but in the database
-        for p in existing_files.keys():
+        for p, item in existing_files.items():
             if not os.path.exists(p):
-                session.get(existing_files[p]["id"]).delete()
+                session.delete(item)
                 print(f"removed {p}")
 
         session.commit()
