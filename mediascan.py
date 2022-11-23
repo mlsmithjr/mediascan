@@ -235,52 +235,32 @@ def dig(path: Dict):
     global mode
 
     root = path["path"]
-    reference_file = None
-    file_filter_list = list()
-    result = session.query(sqlalchemy.func.max(Item.last_modified)).filter(Item.filepath.startswith(root)).one()
-    max_ts = result[0]
-    if max_ts is None:
-        max_ts = datetime.datetime.DateTime(1970, 1, 1, 0, 0, 0)
-    else:
-        result = session.query(Item).filter(Item.last_modified.__eq__(max_ts)).first()
-        reference_file = os.path.join(result.filepath, result.filename) 
 
-    if reference_file:
-        # find all files modified/added since max_ts
-        find_args = ["find", root, "-newer", reference_file]
-        with subprocess.Popen(find_args, stdout=subprocess.PIPE) as proc:
-            lines = proc.stdout.readlines()
-            filelist = [line.decode('utf-8').strip() for line in lines]
+    for root, subdir, files in os.walk(root):
+        for file in files:
+            if file.startswith(".") or file.startswith("._") or os.path.isdir(file):
+                continue
+            if file[-4:] in EXTENSIONS:
+                try:
+                    p = os.path.join(root, file)
+                    
+                    if p in existing_files:
 
-    for file in filelist:
-#    for root, subdir, files in os.walk(root):
-#        for file in files:
-        if file.startswith(".") or file.startswith("._") or os.path.isdir(file):
-            continue
-        if file[-4:] in EXTENSIONS:
-            try:
-                p = os.path.join(root, file)
-                
-                if len(filelist) > 0 and p not in filelist:
-                    continue
+                        # make sure it was changed before we reprocess
 
-                if p in existing_files:
-
-                    # make sure it was changed before we reprocess
-
-                    last_mod = get_filemodtime(p)
-                    db_last_mod = existing_files[p].last_modified
-                    if last_mod == db_last_mod:
-                        continue
-                
-                info = getinfo(p)
-                if info.valid:
-                    print(f"  {file}")
-                    store(os.path.dirname(file), os.path.basename(file), info, path)
-            except Exception as ex:
-#                print(" " + os.path.join(root, file))
-                print(file)
-                raise ex
+                        last_mod = get_filemodtime(p)
+                        db_last_mod = existing_files[p].last_modified
+                        if last_mod == db_last_mod:
+                            continue
+                    
+                    info = getinfo(p)
+                    if info.valid:
+                        print(f"  {file}")
+                        store(root, file, info, path)
+                except Exception as ex:
+    #                print(" " + os.path.join(root, file))
+                    print(file)
+                    raise ex
                 
     session.commit()
 
