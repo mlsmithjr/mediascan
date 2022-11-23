@@ -1,6 +1,6 @@
 import json
 import sys
-from typing import Dict, List
+from typing import Dict, List, Optional
 from sqlalchemy import Column, ForeignKey, Integer, String, DateTime
 import sqlalchemy
 from sqlalchemy.orm import declarative_base
@@ -12,12 +12,14 @@ import numpy as np
 import re
 
 
-episode_pattern = re.compile(r"S(\d+)E(\d+)")
-episode_pattern_alt1 = re.compile(r"S(\d+)E(\d+)(-)(\d+)")
-episode_pattern_alt2 = re.compile(r"S(\d+)((?:E\d+)+)")
-season_pattern = re.compile(r"Season\ (\d+)")
-show_pattern = re.compile(r"(/.+?)/Season\ \d+")
-name_pattern = re.compile(r"^/.*/(.+)$")
+episode_pattern = re.compile(r"S(\d+)E(\d+)", re.IGNORECASE)
+episode_pattern_alt1 = re.compile(r"S(\d+)E(\d+)(-)(\d+)", re.IGNORECASE)
+episode_pattern_alt2 = re.compile(r"S(\d+)((?:E\d+)+)", re.IGNORECASE)
+season_pattern = re.compile(r"Season\ (\d+)", re.IGNORECASE)
+show_pattern = re.compile(r"(/.+?)/Season\ \d+", re.IGNORECASE)
+name_pattern = re.compile(r"^/.*/(.+)$", re.IGNORECASE)
+
+sources = [ "bluray", "dvd", "webdl", "webrip", "stdtv", "hdtv"]
 
 
 def sum_show(seasons: List[Item]) -> Dict:
@@ -33,7 +35,7 @@ def sum_show(seasons: List[Item]) -> Dict:
         
     return summary
 
-def extract_se(filename) -> tuple:
+def extract_se(filename):
     # try spanning patterns (00-01)
     match = episode_pattern_alt1.search(filename)
     if match and match.group(3) == "-":
@@ -41,7 +43,7 @@ def extract_se(filename) -> tuple:
         first = match.group(2)
         last = match.group(4)
 #        last = re.compile(r"S\d+E\d+-(\d+)").search(filename).group(4)
-        return (int(s), int(first), int(last))
+        return (int(s), [int(first), int(last)])
 
     # try multi-episode pattern (E01E02E03...)
     match = episode_pattern_alt2.search(filename)
@@ -57,10 +59,16 @@ def extract_se(filename) -> tuple:
     if match:
         s = match.group(1)
         ep = match.group(2)
-        return (int(s), int(ep))
+        return (int(s), [int(ep)])
 
     return ()                        
 
+def extract_src(filename: str) -> Optional[str]:
+    copy = filename.lower()
+    for source in sources:
+        if source in copy:
+            return source
+    return "???"
 
 
 if __name__ == "__main__":
@@ -93,7 +101,7 @@ if __name__ == "__main__":
         results = session.query(Item.filepath, sqlalchemy.func.avg(Item.filesize_mb)).filter(Item.tag == "tv").group_by(Item.filepath).all()
         
         for path, _avg in results:
-            print(path)
+            #print(path)
                 
             try:
                 smatch = season_pattern.search(path)
@@ -112,36 +120,41 @@ if __name__ == "__main__":
                 res = set()
                 src = set()
 
-                stats[path] = { "avg": _avg, "src": set(), "res": set(), "vcodecs": set() }
+                stats[path] = { "avg": int(_avg), "src": set(), "res": set(), "vcodecs": set() }
+                
+                #
+                # process each episode
+                #
                 items = session.query(Item).filter(Item.filepath == path).all()
+                if not items:
+                    continue
+
+                size = 0
                 for item in items:
 
-                    # get list of filesizes
+                    # filesizes
                     sizes.append(item.filesize_mb)
                     
-                    # get list of episode numbers
-                    match = episode_pattern.search(item.filename)
-                    if match:
-                        s = match.group(1)
-                        ep = match.group(2)
-                        eplist.append(int(ep))
-                        
-                        if season > 0 and season != int(s):
+                    # season and episode numbers
+                    se = extract_se(item.filename)
+                    if len(se) == 2:
+                        s, e = se
+                        if season > 0 and season != s:
                             oop.append(item.filename)
+                        eplist.extend(e)
+                    else:
+                        print(f"Unable to parse season/episode(s) from {item.filename} -- skipped")
+                        continue
 
                     codecs.add(item.vcodec)
                     res.add(item.height)
-                    if "Bluray" in item.filename:
-                        src.add("bluray")
-                    elif "WEBDL" in item.filename:
-                        src.add("webdl")
-                    elif "DVD" in item.filename:
-                        src.add("dvd")
-                    else:
-                        src.add("???")
-                 
+                    src.add(extract_src(item.filename))
+
+                #
+                # store details
+                #
                 stats[path]["season"] = season   
-                stats[path]["std"] = np.std(sizes)
+                stats[path]["std"] = int(np.std(sizes))
                 stats[path]["max"] = np.max(sizes)
                 stats[path]["min"] = np.min(sizes)
 
@@ -154,7 +167,7 @@ if __name__ == "__main__":
                 stats[path]["vcodecs"] = codecs
                 
             except Exception as ex:
-                print(str(ex))
+                print(ex)
                 print(f"** Unexpected error processing {path} -- skipping")            
 
         #
@@ -190,22 +203,23 @@ if __name__ == "__main__":
             for season in seasons:
                 report = ""
 
-                if season["std"] > 500 or season["std"] > season["min"]:
-                    report += f"     Inconsistent file sizes, possible quality issues (stddev={season['std']}mB, min={season['min']}mB, max={season['max']}mB)\n"
+                threshold = (season["std"] / season["min"]) * 100
+                if season["std"] > season["min"] or threshold > 30.0:
+                    report += f"     Inconsistent file sizes, possible quality issues (stddev={season['std']}, min={season['min']}, max={season['max']}), avg={season['avg']}\n"
                 
                 #
                 # Report on out of place episodes
                 #
                 if "oop" in season and len(season["oop"]):
-                    report += "    Out of place:\n"
+                    report += "     Out of place:\n"
                     for oop in season["oop"]:
-                        report += f"     {oop}\n"
+                        report += f"       {oop}\n"
                                     
                 #
                 # Report on episode gaps
                 #
                 if "egaps" in season and len(season["egaps"]):
-                    report += "      Season gaps: " + ",".join(season["egaps"]) + "\n"
+                    report += "      Missing: " + ",".join(season["egaps"]) + "\n"
                 if "src" in season and len(season["src"]) > 1:
                     report += f"     Sources: {season['src']}\n"
                 if len(season["vcodecs"]) > 1:
