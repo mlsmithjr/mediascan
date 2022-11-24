@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from typing import Dict, List, Optional
 from sqlalchemy import Column, ForeignKey, Integer, String, DateTime
@@ -6,8 +7,8 @@ import sqlalchemy
 from sqlalchemy.orm import declarative_base
 from sqlalchemy import create_engine
 from sqlalchemy import select
-from sqlalchemy.orm import Session, relationship
-from mediascan import validate, Item, CONFIG_SCHEMA
+from sqlalchemy.orm import Session, relationship, joinedload
+from mediascan import validate, Item, Audio, CONFIG_SCHEMA
 import numpy as np
 import re
 
@@ -70,6 +71,9 @@ def extract_src(filename: str) -> Optional[str]:
             return source
     return "???"
 
+#
+# main
+#
 
 if __name__ == "__main__":
     ##
@@ -93,6 +97,11 @@ if __name__ == "__main__":
         print("No enabled database configured")
         sys.exit(0)
         
+    if os.path.exists("media.json"):
+        with open("media.json", "r") as mediafile:
+            media_options = json.load(mediafile)
+    else:
+        media_options = {}        
 
     stats = {}        
     engine = create_engine(db_url, echo=False, future=True)
@@ -119,19 +128,28 @@ if __name__ == "__main__":
                 oop = []
                 res = set()
                 src = set()
+                acodecs = set()
+                alang = set()
+                clayouts = set()
 
                 stats[path] = { "avg": int(_avg), "src": set(), "res": set(), "vcodecs": set() }
                 
                 #
                 # process each episode
                 #
-                items = session.query(Item).filter(Item.filepath == path).all()
+                items: List[Item] = session.query(Item).options(joinedload(Item.audio)).filter(Item.filepath == path).all()
                 if not items:
                     continue
 
                 size = 0
                 for item in items:
 
+                    if item.audio:
+                        for a in item.audio:
+                            acodecs.add(a.codec)
+                            alang.add(a.lang)
+                            clayouts.add(a.channel_layout)
+                    
                     # filesizes
                     sizes.append(item.filesize_mb)
                     
@@ -143,7 +161,7 @@ if __name__ == "__main__":
                             oop.append(item.filename)
                         eplist.extend(e)
                     else:
-                        print(f"Unable to parse season/episode(s) from {item.filename} -- skipped")
+                        print(f"  * Unable to parse season/episode(s) from {item.filename} -- skipped")
                         continue
 
                     codecs.add(item.vcodec)
@@ -165,6 +183,9 @@ if __name__ == "__main__":
                 stats[path]["res"] = res
                 stats[path]["oop"] = oop
                 stats[path]["vcodecs"] = codecs
+                stats[path]["acodecs"] = acodecs
+                stats[path]["alang"] = alang
+                stats[path]["clayouts"] = clayouts
                 
             except Exception as ex:
                 print(ex)
@@ -187,6 +208,13 @@ if __name__ == "__main__":
 
             name = name_pattern.match(show).group(1)
             print(f"{name}:")
+            
+            if show in media_options:
+                opts = media_options[shows]
+                if "locked" in opts and opts["locked"]:
+                    # user has indicated the show is locked and just ignore it
+                    continue
+            
             if len(summary["vcodecs"]) > 1:
                 print(f"   Mixture of video codecs: {summary['vcodecs']}")
             #
@@ -203,10 +231,13 @@ if __name__ == "__main__":
             for season in seasons:
                 report = ""
 
-                threshold = (season["std"] / season["min"]) * 100
-                if season["std"] > season["min"] or threshold > 30.0:
-                    report += f"     Inconsistent file sizes, possible quality issues (stddev={season['std']}, min={season['min']}, max={season['max']}), avg={season['avg']}\n"
-                
+                if "std" in season:
+                    threshold = (season["std"] / season["min"]) * 100
+                    if season["std"] > season["min"] or threshold > 30.0:
+                        report += f"     Inconsistent file sizes, possible quality issues (stddev={season['std']}, min={season['min']}, max={season['max']}), avg={season['avg']}\n"
+                else:
+                    print(f"Unexpected missing data in {show}, Season {season['season']} - skipped")
+                    continue
                 #
                 # Report on out of place episodes
                 #
@@ -226,6 +257,8 @@ if __name__ == "__main__":
                     report += f"     Video codecs: {season['vcodecs']}\n"
                 if len(season["res"]) > 1:
                     report += f"     Resolutions: {season['res']}\n"
+                if len(season["clayouts"]) > 1:
+                    report += f"     Channel layouts: {season['clayouts']}\n"
 
                 if len(report) > 0:
                     report = f"   Season {season['season']}\n" + report
