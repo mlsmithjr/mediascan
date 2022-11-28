@@ -19,8 +19,9 @@ episode_pattern_alt2 = re.compile(r"S(\d+)((?:E\d+)+)", re.IGNORECASE)
 season_pattern = re.compile(r"Season\ (\d+)", re.IGNORECASE)
 show_pattern = re.compile(r"(/.+?)/Season\ \d+", re.IGNORECASE)
 name_pattern = re.compile(r"^/.*/(.+)$", re.IGNORECASE)
+trunc_pattern = re.compile(r"^.*(S\d+E\d+.*)", re.IGNORECASE)
 
-sources = [ "bluray", "dvd", "webdl", "webrip", "stdtv", "hdtv"]
+sources = [ "bluray", "dvd", "webdl", "webrip", "sdtv", "hdtv"]
 
 
 def sum_show(seasons: List[Item]) -> Dict:
@@ -28,11 +29,13 @@ def sum_show(seasons: List[Item]) -> Dict:
     summary["src"] = set()
     summary["res"] = set()
     summary["vcodecs"] = set()
+    summary["pixformats"] = set()
 
     for season in seasons:
         summary["src"].update(season["src"])
         summary["res"].update(season["res"])
         summary["vcodecs"].update(season["vcodecs"])
+        summary["pixformats"].update(season["pixformats"])
         
     return summary
 
@@ -71,11 +74,39 @@ def extract_src(filename: str) -> Optional[str]:
             return source
     return "???"
 
+def mixed_sources(sources):                
+    if "bluray" in sources and len(sources) > 1:
+        return True
+    return False
+
+def details_header() -> str:
+    return f"   {'Episode':65} {'Dur':>7} {'Size(mb)':>8} {'FPS':>5} {'Resolution'} {'Color':>10} {'Pixel Fmt':>12}"
+
+def details(item: Item) -> str:
+    match = trunc_pattern.search(item.filename)
+    if match:
+        partial = match.group(1)
+    else:
+        partial = item.filename
+    details = f"   {partial:65} {item.duration:>7} {item.filesize_mb:>8} {item.fps:>5} {item.width:>5}x{item.height:<4} {item.color_space or '':>10} {item.pix_format:>12}"
+    return details
+
 #
 # main
 #
 
 if __name__ == "__main__":
+
+    report_codecs = False
+    show_details = False
+    
+    if len(sys.argv) > 1:
+        for arg in sys.argv:
+            if arg == "-c":
+                report_codecs = True
+            elif arg == "-d":
+                show_details = True
+
     ##
     # load configuration and validate
     #
@@ -97,18 +128,24 @@ if __name__ == "__main__":
         print("No enabled database configured")
         sys.exit(0)
         
-    if os.path.exists("media.json"):
-        with open("media.json", "r") as mediafile:
+    if os.path.exists("mediaopts.json"):
+        with open("mediaopts.json", "r") as mediafile:
             media_options = json.load(mediafile)
     else:
         media_options = {}        
+
+    if show_details:
+        detailsfile = open("details.txt", "w")
 
     stats = {}        
     engine = create_engine(db_url, echo=False, future=True)
     with Session(engine) as session:
         
-        results = session.query(Item.filepath, sqlalchemy.func.avg(Item.filesize_mb)).filter(Item.tag == "tv").group_by(Item.filepath).all()
+        results = session.query(Item.filepath, sqlalchemy.func.avg(Item.filesize_mb)).filter(Item.tag == "tv").group_by(Item.filepath).order_by("filepath").all()
         
+        if show_details:
+            detailsfile.write(details_header() + "\n")
+            
         for path, _avg in results:
             #print(path)
                 
@@ -131,6 +168,7 @@ if __name__ == "__main__":
                 acodecs = set()
                 alang = set()
                 clayouts = set()
+                pixf = set()
 
                 stats[path] = { "avg": int(_avg), "src": set(), "res": set(), "vcodecs": set() }
                 
@@ -141,8 +179,13 @@ if __name__ == "__main__":
                 if not items:
                     continue
 
-                size = 0
+                if show_details:
+                    detailsfile.write(f"{path}:\n")
+
                 for item in items:
+
+                    if show_details:
+                        detailsfile.write(details(item) + "\n")
 
                     if item.audio:
                         for a in item.audio:
@@ -152,6 +195,8 @@ if __name__ == "__main__":
                     
                     # filesizes
                     sizes.append(item.filesize_mb)
+                    
+                    pixf.add(item.pix_format)
                     
                     # season and episode numbers
                     se = extract_se(item.filename)
@@ -175,6 +220,7 @@ if __name__ == "__main__":
                 stats[path]["std"] = int(np.std(sizes))
                 stats[path]["max"] = np.max(sizes)
                 stats[path]["min"] = np.min(sizes)
+                stats[path]["avg"] = int(np.average(sizes))
 
                 mxe = np.max(eplist)
                 egaps = set([e for e in range(1, mxe)]).difference(eplist)
@@ -186,6 +232,7 @@ if __name__ == "__main__":
                 stats[path]["acodecs"] = acodecs
                 stats[path]["alang"] = alang
                 stats[path]["clayouts"] = clayouts
+                stats[path]["pixformats"] = pixf
                 
             except Exception as ex:
                 print(ex)
@@ -207,20 +254,28 @@ if __name__ == "__main__":
             summary = sum_show(seasons)
 
             name = name_pattern.match(show).group(1)
-            print(f"{name}:")
             
-            if show in media_options:
-                opts = media_options[shows]
-                if "locked" in opts and opts["locked"]:
+            if name in media_options:
+                opts = media_options[name]
+                if opts.get("locked", False):
                     # user has indicated the show is locked and just ignore it
+                    print(f"{name} (skipped)")
                     continue
+            else:
+                media_options[name] = { "locked": False }
             
-            if len(summary["vcodecs"]) > 1:
-                print(f"   Mixture of video codecs: {summary['vcodecs']}")
+            print(f"{name}:")
+            if report_codecs:
+                if len(summary["vcodecs"]) > 1:
+                    print(f"   Mixture of video codecs: {summary['vcodecs']}")
+                    
+            if len(summary["pixformats"]) > 1:
+                print(f"   Mixture of pixel formats: {summary['pixformats']}")
+
             #
             # Report on inconsistent source (br, webdl) at series level
             #
-            if len(summary["src"]) > 1:
+            if "src" in summary and mixed_sources(summary["src"]):
                 print(f"   Mixture of video sources: {summary['src']}")
             #
             # Report on inconsistent resolutions
@@ -231,10 +286,13 @@ if __name__ == "__main__":
             for season in seasons:
                 report = ""
 
+                if len(season["pixformats"]) > 1:
+                        report += f"   Mixture of pixel formats: {season['pixformats']}\n"
+
                 if "std" in season:
-                    threshold = (season["std"] / season["min"]) * 100
+                    threshold = (season["std"] / season["avg"]) * 100
                     if season["std"] > season["min"] or threshold > 30.0:
-                        report += f"     Inconsistent file sizes, possible quality issues (stddev={season['std']}, min={season['min']}, max={season['max']}), avg={season['avg']}\n"
+                        report += f"     Inconsistent file sizes (stddev={season['std']}, min={season['min']}, max={season['max']}), avg={season['avg']}\n"
                 else:
                     print(f"Unexpected missing data in {show}, Season {season['season']} - skipped")
                     continue
@@ -250,18 +308,27 @@ if __name__ == "__main__":
                 # Report on episode gaps
                 #
                 if "egaps" in season and len(season["egaps"]):
-                    report += "      Missing: " + ",".join(season["egaps"]) + "\n"
-                if "src" in season and len(season["src"]) > 1:
+                    report += "     Missing: " + ",".join(season["egaps"]) + "\n"
+
+                if "src" in season and mixed_sources(season["src"]):
                     report += f"     Sources: {season['src']}\n"
-                if len(season["vcodecs"]) > 1:
-                    report += f"     Video codecs: {season['vcodecs']}\n"
+                    
+                if report_codecs:
+                    if len(season["vcodecs"]) > 1:
+                        report += f"     Video codecs: {season['vcodecs']}\n"
+
                 if len(season["res"]) > 1:
                     report += f"     Resolutions: {season['res']}\n"
-                if len(season["clayouts"]) > 1:
-                    report += f"     Channel layouts: {season['clayouts']}\n"
+#                if len(season["clayouts"]) > 1:
+#                    report += f"     Channel layouts: {season['clayouts']}\n"
 
                 if len(report) > 0:
                     report = f"   Season {season['season']}\n" + report
                     print(report)
 
-      
+    if show_details:
+        detailsfile.close()
+
+    with open("mediaopts.json", "w") as mediafile:
+        json.dump(media_options, mediafile, indent=4)
+    print("mediaopts.json updated.")

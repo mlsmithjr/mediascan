@@ -20,7 +20,7 @@ from typing import Optional, Dict
 
 EXTENSIONS = [".mkv", ".mp4", ".avi", ".m4v"]
 
-FFPROBE_PATH="/usr/bin/ffprobe"
+FFPROBE_PATH="ffprobe"
 
 Base = declarative_base()
 
