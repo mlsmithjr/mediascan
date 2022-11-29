@@ -11,7 +11,7 @@ from jsonschema import validate
 from functools import cache
 from sqlalchemy import Column, ForeignKey, Integer, String, DateTime
 import sqlalchemy
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import declarative_base, joinedload
 from sqlalchemy import create_engine
 from sqlalchemy import select
 from sqlalchemy.orm import Session, relationship
@@ -28,26 +28,35 @@ Base = declarative_base()
 
 SERIES_REGEX = re.compile(r"(.*)\.S(\d+)E(\d+)")
 
+    
+class Path(Base):
+    __tablename__ = "path"
+
+    id = Column(Integer, primary_key=True)
+    filepath = Column(String(100), nullable=False, index=True)
+    mediatype = Column(String(5), nullable=False)
+
 class Item(Base):
     __tablename__ = "item"
     id = Column(Integer, primary_key=True)
-    filename = Column(String, nullable=False, index=True)
-    filepath = Column(String, nullable=False, index=True)
-    vcodec = Column(String, nullable=False)
+    pathid = Column(Integer, ForeignKey("path.id"), nullable=False)
+    title = Column(String(100))
+    filename = Column(String(100), nullable=False, index=True)
+    vcodec = Column(String(10), nullable=False)
     filesize_mb = Column(Integer)
     height = Column(Integer)
     width = Column(Integer)
     duration = Column(Integer)
-    fps = Column(String)
-    color_space = Column(String)
-    pix_format = Column(String)
+    fps = Column(String(7))
+    color_space = Column(String(15))
+    pix_format = Column(String(15))
     last_modified = Column(DateTime)
-    tag = Column(String)
-    mediatype = Column(String, nullable=False)
+    tag = Column(String(30))
     
     audio = relationship("Audio", back_populates="item", cascade="all, merge, delete-orphan")
     subtitle = relationship("Subtitle", back_populates="item", cascade="all, merge, delete-orphan")
-    
+    path = relationship("Path", back_populates="item", cascade="all, merge, delete-orphan")
+
 class Audio(Base):
     __tablename__ = "audio"
     id = Column(Integer, primary_key=True)
@@ -167,8 +176,11 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict):
             
         else:
             item = Item()
+            item.path = Path()
+            item.path.filepath = root
+            item.path.mediatype = path["type"]
+
             item.filename = filename
-            item.filepath = root
             item.vcodec = info.vcodec
             item.height = info.res_height
             item.width = info.res_width
@@ -179,10 +191,9 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict):
             item.duration = info.runtime
             item.last_modified = get_filemodtime(p)
             item.tag = match_tag(p, path)
-            item.mediatype = path["type"]
             session.add(item)
 
-        session.flush()
+###        session.flush()
 
         # make sure there is always a default audio track
         if len(audio) == 1:
@@ -355,10 +366,12 @@ if __name__ == "__main__":
         else:
             # load all existing files and database IDs in advance to speed things up
             existing_files = dict()
-            stmt = select(Item)
-            results = session.scalars(stmt)
+#            stmt = select(Item)
+#            results = session.scalars(stmt)
+            results = session.query(Item).options(joinedload(Item.path)).all()
+
             for result in results:
-                existing_files[os.path.join(result.filepath, result.filename)] =  result
+                existing_files[os.path.join(result.path.filepath, result.filename)] =  result
         
         for path in paths:
             if path.get("enabled", True):
