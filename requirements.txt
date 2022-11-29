@@ -1,0 +1,4 @@
+numpy
+pg8000
+PyYAML
+SQLAlchemy
