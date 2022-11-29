@@ -16,6 +16,8 @@ from sqlalchemy import create_engine
 from sqlalchemy import select
 from sqlalchemy.orm import Session, relationship
 from typing import Optional, Dict
+import yaml
+
 
 
 EXTENSIONS = [".mkv", ".mp4", ".avi", ".m4v"]
@@ -25,42 +27,6 @@ FFPROBE_PATH="ffprobe"
 Base = declarative_base()
 
 SERIES_REGEX = re.compile(r"(.*)\.S(\d+)E(\d+)")
-
-CONFIG_SCHEMA = {
-  "type": "object",
-  "properties": {
-    "paths": {
-        "type": "array",
-        "items": {
-            "type": "object",
-            "required": [ "path" ],
-            "properties": {
-                "path": {
-                    "type": "string"
-                },
-                "enabled": {
-                    "type": "boolean"
-                }
-            }
-      }
-    },
-    "database": {
-      "type": "array",
-      "items": {
-          "type": "object",
-          "required": [ "connect" ],
-          "properties": {
-              "connect": {
-                  "type": "string"
-              },
-              "enabled": {
-                  "type": "boolean"
-              }
-          }
-      }
-    }
-  }
-}
 
 class Item(Base):
     __tablename__ = "item"
@@ -77,6 +43,7 @@ class Item(Base):
     pix_format = Column(String)
     last_modified = Column(DateTime)
     tag = Column(String)
+    mediatype = Column(String, nullable=False)
     
     audio = relationship("Audio", back_populates="item", cascade="all, merge, delete-orphan")
     subtitle = relationship("Subtitle", back_populates="item", cascade="all, merge, delete-orphan")
@@ -196,6 +163,7 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict):
             item.duration = info.runtime
             item.last_modified = get_filemodtime(p)
             item.tag = match_tag(p, path)
+            item.mediatype = path["type"]
             
         else:
             item = Item()
@@ -211,6 +179,7 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict):
             item.duration = info.runtime
             item.last_modified = get_filemodtime(p)
             item.tag = match_tag(p, path)
+            item.mediatype = path["type"]
             session.add(item)
 
         session.flush()
@@ -238,7 +207,7 @@ def dig(path: Dict):
 
     for root, subdir, files in os.walk(root):
         for file in files:
-            if file.startswith(".") or file.startswith("._") or os.path.isdir(file):
+            if file.startswith(".") or os.path.isdir(file):
                 continue
             if file[-4:] in EXTENSIONS:
                 try:
@@ -356,15 +325,8 @@ if __name__ == "__main__":
     ##
     # load configuration and validate
     #
-    with open("mediascan.json", "r") as f:
-        config = json.load(f)
-
-    try:
-        validate(config, CONFIG_SCHEMA)
-    except Exception as ex:
-        print("There is a problem with the configuration file...")
-        print(str(ex))
-        sys.exit(1)
+    with open("mediascan.yml", "r") as f:
+        config = yaml.load(f, Loader=yaml.Loader)
 
     for db in config["database"]:
         if db.get("enabled", True):
@@ -403,11 +365,11 @@ if __name__ == "__main__":
                 print(path["path"])
                 dig(path)
 
-        # finally, purge any files no longer on disk but in the database
+        # finally, purge any records in the database whose file no longer exists
         for p, item in existing_files.items():
             if not os.path.exists(p):
                 session.delete(item)
-                print(f"removed {p}")
+                print(f"removed {p} from database")
 
         session.commit()
     

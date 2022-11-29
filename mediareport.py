@@ -8,9 +8,10 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy import create_engine
 from sqlalchemy import select
 from sqlalchemy.orm import Session, relationship, joinedload
-from mediascan import validate, Item, Audio, CONFIG_SCHEMA
+from mediascan import validate, Item, Audio
 import numpy as np
 import re
+import yaml
 
 
 episode_pattern = re.compile(r"S(\d+)E(\d+)", re.IGNORECASE)
@@ -77,6 +78,8 @@ def extract_src(filename: str) -> Optional[str]:
 def mixed_sources(sources):                
     if "bluray" in sources and len(sources) > 1:
         return True
+    if "dvd" in sources and len(sources) > 1:
+        return True
     return False
 
 def details_header() -> str:
@@ -110,15 +113,8 @@ if __name__ == "__main__":
     ##
     # load configuration and validate
     #
-    with open("mediascan.json", "r") as f:
-        config = json.load(f)
-
-    try:
-        validate(config, CONFIG_SCHEMA)
-    except Exception as ex:
-        print("There is a problem with the configuration file...")
-        print(str(ex))
-        sys.exit(1)
+    with open("mediascan.yml", "r") as f:
+        config = yaml.load(f, Loader=yaml.Loader)
 
     for db in config["database"]:
         if db.get("enabled", True):
@@ -141,7 +137,7 @@ if __name__ == "__main__":
     engine = create_engine(db_url, echo=False, future=True)
     with Session(engine) as session:
         
-        results = session.query(Item.filepath, sqlalchemy.func.avg(Item.filesize_mb)).filter(Item.tag == "tv").group_by(Item.filepath).order_by("filepath").all()
+        results = session.query(Item.filepath, sqlalchemy.func.avg(Item.filesize_mb)).filter(Item.mediatype == "tv").group_by(Item.filepath).order_by("filepath").all()
         
         if show_details:
             detailsfile.write(details_header() + "\n")
@@ -300,10 +296,10 @@ if __name__ == "__main__":
                 # Report on out of place episodes
                 #
                 if "oop" in season and len(season["oop"]):
-                    report += "     Out of place:\n"
+                    report += "     Out of place: "
                     for oop in season["oop"]:
-                        report += f"       {oop}\n"
-                                    
+                        report += f"       {oop}"
+                    report += "\n"
                 #
                 # Report on episode gaps
                 #
