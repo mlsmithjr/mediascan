@@ -38,6 +38,8 @@ Configuration for both scripts is in _mediascan.yml_.  It contains a list of med
 ## database ##
 ---
 You only need 1 database connection given.  There are 2 provided here to show alternate examples, but only one is enabled.  On first run if the database tables are missing they will be created automatically.
+> For a large collection, reporting performance is considerably faster if using an external database like Postgres or MySQL.
+
 
 |  Setting        | Description     |
 |--------------|---------------------------------------|
