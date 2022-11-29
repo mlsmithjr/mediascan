@@ -1,5 +1,5 @@
 import unittest
-from mediareport import extract_se
+from mediareport import extract_se, show_pattern, name_pattern
 
 
 class RegExTests(unittest.TestCase):
@@ -28,6 +28,11 @@ class RegExTests(unittest.TestCase):
         self.assertEqual(len(episodes), 3)
         self.assertEqual(episodes[1], 3)
         
+    def test_show_name_pattern(self):
+        match = show_pattern.search("/root/subdir/tv/Hello, World/Season 1")
+        self.assertIsNotNone(match)
+        show = name_pattern.search(match.group(1))
+        self.assertEqual(show.group(1), "Hello, World")
     
 if __name__ == "__main__":
     unittest.main()

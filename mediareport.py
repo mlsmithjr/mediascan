@@ -102,6 +102,7 @@ if __name__ == "__main__":
 
     report_codecs = False
     show_details = False
+    show_langdefaults = False
     
     if len(sys.argv) > 1:
         for arg in sys.argv:

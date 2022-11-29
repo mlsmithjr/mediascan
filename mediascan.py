@@ -40,7 +40,6 @@ class Item(Base):
     __tablename__ = "item"
     id = Column(Integer, primary_key=True)
     pathid = Column(Integer, ForeignKey("path.id"), nullable=False)
-    title = Column(String(100))
     filename = Column(String(300), nullable=False, index=True)
     vcodec = Column(String(10), nullable=False)
     filesize_mb = Column(Integer)
@@ -167,6 +166,7 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict):
         if p in existing_files:
             itemid = existing_files[p].id
             dbpath = existing_files[p].path
+            
         if itemid != -1:
             item = session.get(Item, itemid)
             item.audio.clear()
