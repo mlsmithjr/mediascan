@@ -8,7 +8,7 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy import create_engine
 from sqlalchemy import select
 from sqlalchemy.orm import Session, relationship, joinedload
-from mediascan import validate, Item, Audio
+from mediascan import validate, Item, Audio, Path
 import numpy as np
 import re
 import yaml
@@ -109,6 +109,8 @@ if __name__ == "__main__":
                 report_codecs = True
             elif arg == "-d":
                 show_details = True
+            elif arg == "-l":
+                show_langdefaults = True
 
     ##
     # load configuration and validate
@@ -137,12 +139,14 @@ if __name__ == "__main__":
     engine = create_engine(db_url, echo=False, future=True)
     with Session(engine) as session:
         
-        results = session.query(Item.filepath, sqlalchemy.func.avg(Item.filesize_mb)).filter(Item.mediatype == "tv").group_by(Item.filepath).order_by("filepath").all()
+        results = session.query(Path).filter(Path.mediatype == "tv").order_by("filepath").all()
+        #results = session.query(Item.filepath, sqlalchemy.func.avg(Item.filesize_mb)).filter(Item.mediatype == "tv").group_by(Item.filepath).order_by("filepath").all()
         
         if show_details:
             detailsfile.write(details_header() + "\n")
             
-        for path, _avg in results:
+        for result in results:
+            path = result.filepath
             #print(path)
                 
             try:
@@ -166,12 +170,12 @@ if __name__ == "__main__":
                 clayouts = set()
                 pixf = set()
 
-                stats[path] = { "avg": int(_avg), "src": set(), "res": set(), "vcodecs": set() }
+                stats[path] = { "avg": 0, "src": set(), "res": set(), "vcodecs": set() }
                 
                 #
                 # process each episode
                 #
-                items: List[Item] = session.query(Item).options(joinedload(Item.audio)).filter(Item.filepath == path).all()
+                items: List[Item] = session.query(Item).options(joinedload(Item.audio)).options(joinedload(Item.subtitle)).filter(Item.path == result).all()
                 if not items:
                     continue
 
@@ -186,7 +190,8 @@ if __name__ == "__main__":
                     if item.audio:
                         for a in item.audio:
                             acodecs.add(a.codec)
-                            alang.add(a.lang)
+                            if a.isdefault:
+                                alang.add(a.lang)
                             clayouts.add(a.channel_layout)
                     
                     # filesizes
@@ -255,7 +260,7 @@ if __name__ == "__main__":
                 opts = media_options[name]
                 if opts.get("locked", False):
                     # user has indicated the show is locked and just ignore it
-                    print(f"{name} (skipped)")
+                    print(f"{name} (locked)")
                     continue
             else:
                 media_options[name] = { "locked": False }
@@ -292,6 +297,9 @@ if __name__ == "__main__":
                 else:
                     print(f"Unexpected missing data in {show}, Season {season['season']} - skipped")
                     continue
+                
+                if show_langdefaults and "alang" in season and len(season["alang"]) > 1:
+                    report += f"     Multiple audio languages set to default: {season['alang']}\n"
                 #
                 # Report on out of place episodes
                 #

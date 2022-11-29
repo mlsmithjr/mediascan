@@ -106,6 +106,7 @@ Run the analysis on database collected in the database.  Various hard-coded patt
 
   * -c will cause the analysis to report on video codec use. It is off by default since reporting on mixed codecs isn't very helpful to most people.
   * -d will generated a detail report of all media to **details.txt**. If you will not be using the database for your own ad-hoc queries you can use this report to look at the same details the analysis is calling out.
+  * -l will warn if multiple languages are set as default in a season.
 
 > After each run the report creates/updates a file called mediaopts.json.  You can optionally edit this file and set the *locked* flag to *true* for any show you want to avoid reporting on.  For example, shows you've audited and "cleared" of issues so they don't clutter the report.
 
@@ -129,7 +130,7 @@ My Messed Up Show:
       Out of place: 6
       Mixture of video sources: {'webdl', 'bluray'}
       Mixture of video codecs: {'hevc', 'h264'}
-
+      Multiple audio languages set to default: {'???', 'eng'}
 ```
 
 Show-level inconsistencies are reporting on first, then each season is broken down separately.
@@ -148,6 +149,9 @@ Resolutions
 
 Inconsistent file sizes
 > This is a best-guess detection of potential quality inconsistencies. The reported numbers are standard deviation, minimum, maximum, and average. This only shows up if the formula is triggered, which is currently: **((stddev / avg) * 100) > 30.0**. Often this is a false positive because several factors could account for file size gaps, such as a mix of h264- and h265-encoded episodes, double-length episodes, or shorter than typical episodes.  Most likely focusing on the minimum and average values is most useful.
+
+Multiple audio languages set to default (if using -l)
+> Reported if different languages have the default flag set on audio tracks. For example, if some episodes have English and others have Japanese defaults. Not usually an issue.
 
 Out of place
 > Episodes in the wrong season folder based on filename.

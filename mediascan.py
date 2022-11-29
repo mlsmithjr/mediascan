@@ -33,7 +33,7 @@ class Path(Base):
     __tablename__ = "path"
 
     id = Column(Integer, primary_key=True)
-    filepath = Column(String(100), nullable=False, index=True)
+    filepath = Column(String(200), nullable=False, index=True)
     mediatype = Column(String(5), nullable=False)
 
 class Item(Base):
@@ -41,7 +41,7 @@ class Item(Base):
     id = Column(Integer, primary_key=True)
     pathid = Column(Integer, ForeignKey("path.id"), nullable=False)
     title = Column(String(100))
-    filename = Column(String(100), nullable=False, index=True)
+    filename = Column(String(300), nullable=False, index=True)
     vcodec = Column(String(10), nullable=False)
     filesize_mb = Column(Integer)
     height = Column(Integer)
@@ -55,15 +55,15 @@ class Item(Base):
     
     audio = relationship("Audio", back_populates="item", cascade="all, merge, delete-orphan")
     subtitle = relationship("Subtitle", back_populates="item", cascade="all, merge, delete-orphan")
-    path = relationship("Path", back_populates="item", cascade="all, merge, delete-orphan")
+    path = relationship("Path")
 
 class Audio(Base):
     __tablename__ = "audio"
     id = Column(Integer, primary_key=True)
     itemid = Column(Integer, ForeignKey("item.id"), nullable=False)
-    lang = Column(String, index=True)
-    codec = Column(String, index=True)
-    channel_layout = Column(String)
+    lang = Column(String(10), index=True)
+    codec = Column(String(15), index=True)
+    channel_layout = Column(String(15))
     isdefault = Column(Integer)
     item = relationship("Item", back_populates="audio")
 
@@ -71,8 +71,8 @@ class Subtitle(Base):
     __tablename__ = "subtitle"
     id = Column(Integer, primary_key=True)
     itemid = Column(Integer, ForeignKey("item.id"), nullable=False)
-    lang = Column(String, index=True)
-    format = Column(String)
+    lang = Column(String(10), index=True)
+    format = Column(String(15))
     isdefault = Column(Integer)
     item = relationship("Item", back_populates="subtitle")
 
@@ -134,6 +134,16 @@ def compiled_pattern(pattern: str) -> Optional[re.Pattern]:
     r = re.compile(pattern)
     return r
 
+@cache
+def fetch_or_create_dbpath(filepath: str, mediatype: str):
+    thepath = session.query(Path).filter(Path.filepath == filepath).first()
+    if not thepath:
+        thepath = Path()
+        thepath.filepath = filepath
+        thepath.mediatype = mediatype
+    return thepath
+    
+
 def match_tag(p: str, path: Dict):
 
     if "tags" not in path:
@@ -156,6 +166,7 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict):
         p = os.path.join(root, filename)
         if p in existing_files:
             itemid = existing_files[p].id
+            dbpath = existing_files[p].path
         if itemid != -1:
             item = session.get(Item, itemid)
             item.audio.clear()
@@ -172,13 +183,18 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict):
             item.duration = info.runtime
             item.last_modified = get_filemodtime(p)
             item.tag = match_tag(p, path)
-            item.mediatype = path["type"]
             
         else:
             item = Item()
-            item.path = Path()
-            item.path.filepath = root
-            item.path.mediatype = path["type"]
+
+            thepath = fetch_or_create_dbpath(root, path["type"])
+            # if not thepath:
+            #     thepath = Path()
+            #     item.path = thepath
+            #     item.path.filepath = root
+            #     item.path.mediatype = path["type"]
+
+            item.path = thepath
 
             item.filename = filename
             item.vcodec = info.vcodec
@@ -242,7 +258,7 @@ def dig(path: Dict):
                     print(file)
                     raise ex
                 
-    session.commit()
+        session.commit()
 
 def parse_ffmpeg_details_json(_path, info):
     minone = MediaInfo(None)
