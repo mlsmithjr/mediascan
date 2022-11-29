@@ -10,15 +10,15 @@ class RegExTests(unittest.TestCase):
         
         season, episode = results
         self.assertEqual(season, 1)
-        self.assertEqual(episode, 7)
+        self.assertEqual(episode[0], 7)
 
     def test_alt1_pattern(self):
         results = extract_se("file.S01E09-10.stuff.mkv")
-        self.assertTrue(len(results) == 3)
-        season, e1, e2 = results
+        self.assertTrue(len(results) == 2)
+        season, elist = results
         self.assertEqual(season, 1)
-        self.assertEqual(e1, 9)
-        self.assertEqual(e2, 10)
+        self.assertEqual(elist[0], 9)
+        self.assertEqual(elist[1], 10)
     
     def test_alt2_pattern(self):
         results = extract_se("file.S01E02E03E04.stuff.mkv")

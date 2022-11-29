@@ -12,12 +12,12 @@ Feel free to suggest other reporting metrics that are useful (and possible).
 ---
 **requirements**
 
-* Python 3.10+
-* ffprobe (part of ffmpeg package) installed and in current PATH
+* Python 3.8 or higher
+* *ffprobe* (part of *ffmpeg* package) installed and in current PATH
 * Movie and Television media stored under different paths (not mixed).
-* Television series must be storied in season folders using a standard season & episode naming convention, preferably the default used for Sonarr (S01E01).
+* Television series must be stored in season folders using a standard season & episode naming convention, preferably the default used for Sonarr (S01E01).
 
-Mediacan will scan all indicated paths for known media files, problem them for details, and log those details into a SQL database.  By default, you can use SQLite3 which doesn't require any additional installation.  If you choose, you may use any other SQL database supported by SQLAlchemy.
+Mediacan will scan all indicated paths for known media files, probe them for details, and log those details into a SQL database.  By default, you can use SQLite3 which doesn't require any additional installation.  If you choose, you may use any other SQL database supported by SQLAlchemy.
 
 **configuration**
 
