@@ -103,7 +103,7 @@ The report using data from the database collected by mediascan only.  No filesys
 python3 mediareport.py [-c] [-d]
 ```
 
-Run the analysis on database collected in the database.  Various hard-coded patterns are checked and reported.
+Run the analysis on data collected in the database.  Various hard-coded patterns are checked and reported.
 
   * -c will cause the analysis to report on video codec use. It is off by default since reporting on mixed codecs isn't very helpful to most people.
   * -d will generated a detail report of all media to **details.txt**. If you will not be using the database for your own ad-hoc queries you can use this report to look at the same details the analysis is calling out.
