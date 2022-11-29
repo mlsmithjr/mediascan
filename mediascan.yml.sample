@@ -1,0 +1,15 @@
+paths:
+  - path: "/mnt/merger/media/video/Television"
+    enabled: true
+    type: tv
+
+  - path: "/mnt/merger/media/video/Movies"
+    enabled: true
+    type: movie
+
+database:
+  - connect: "sqlite:///mediascan.db"
+    enabled: true
+
+  - connect: "postgresql+pg8000://user:pass@myserver/mediascan"
+    enabled: false
