@@ -172,7 +172,7 @@ if __name__ == "__main__":
                 pixf = set()
 
                 stats[path] = { "avg": 0, "src": set(), "res": set(), "vcodecs": set() }
-                
+                    
                 #
                 # process each episode
                 #
@@ -212,7 +212,7 @@ if __name__ == "__main__":
                         continue
 
                     codecs.add(item.vcodec)
-                    res.add(item.height)
+                    res.add(item.width)
                     src.add(extract_src(item.filename))
 
                 #
@@ -251,7 +251,7 @@ if __name__ == "__main__":
                 shows.add(match.group(1))
 
         for show in sorted(shows):
-            seasons = [v for k,v in stats.items() if k.startswith(show)]
+            seasons = [v for k,v in stats.items() if k.startswith(show + "/Season")]
             #print(show)
             summary = sum_show(seasons)
 
