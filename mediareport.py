@@ -171,14 +171,15 @@ if __name__ == "__main__":
                 clayouts = set()
                 pixf = set()
 
-                stats[path] = { "avg": 0, "src": set(), "res": set(), "vcodecs": set() }
-                    
                 #
                 # process each episode
                 #
                 items: List[Item] = session.query(Item).options(joinedload(Item.audio)).options(joinedload(Item.subtitle)).filter(Item.path == result).all()
                 if not items:
                     continue
+
+                stats[path] = { "avg": 0, "src": set(), "res": set(), "vcodecs": set() }
+                    
 
                 if show_details:
                     detailsfile.write(f"{path}:\n")
@@ -251,7 +252,7 @@ if __name__ == "__main__":
                 shows.add(match.group(1))
 
         for show in sorted(shows):
-            seasons = [v for k,v in stats.items() if k.startswith(show + "/Season")]
+            seasons = [v for k,v in stats.items() if k.startswith(show + "/")]
             #print(show)
             summary = sum_show(seasons)
 
