@@ -148,6 +148,7 @@ if __name__ == "__main__":
             
         for result in results:
             path = result.filepath
+
             #print(path)
                 
             try:

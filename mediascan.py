@@ -399,6 +399,10 @@ if __name__ == "__main__":
             if not os.path.exists(p):
                 session.delete(item)
                 print(f"removed {p} from database")
+        # and purge missing folders from DB
+        for dir in session.query(Path).all():
+            if not os.path.exists(dir.filepath):
+                session.delete(dir)
 
         session.commit()
     
