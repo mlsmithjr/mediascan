@@ -295,7 +295,7 @@ if __name__ == "__main__":
 
                 if "std" in season:
                     threshold = (season["std"] / season["avg"]) * 100
-                    if season["std"] > season["min"] or threshold > 30.0:
+                    if season["std"] > season["min"] or threshold > 40.0:
                         report += f"     Inconsistent file sizes (stddev={season['std']}, min={season['min']}, max={season['max']}), avg={season['avg']}\n"
                 else:
                     print(f"Unexpected missing data in {show}, Season {season['season']} - skipped")

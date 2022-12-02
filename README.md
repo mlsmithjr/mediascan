@@ -149,7 +149,7 @@ Resolutions
 > Multiple resolutions were detected.  Depending on the encoder you will often find oddball resolutions mixed in with standard ones.  Usually they aren't a problem but a perfectionist would probably want to fix.
 
 Inconsistent file sizes
-> This is a best-guess detection of potential quality inconsistencies. The reported numbers are standard deviation, minimum, maximum, and average. This only shows up if the formula is triggered, which is currently: **((stddev / avg) * 100) > 30.0**. Often this is a false positive because several factors could account for file size gaps, such as a mix of h264- and h265-encoded episodes, double-length episodes, or shorter than typical episodes.  Most likely focusing on the minimum and average values is most useful.
+> This is a best-guess detection of potential quality inconsistencies. The reported numbers are standard deviation, minimum, maximum, and average. This only shows up if the formula is triggered, which is currently: **((stddev / avg) * 100) > 40.0**. Often this is a false positive because several factors could account for file size gaps, such as a mix of h264- and h265-encoded episodes, double-length episodes, or shorter than typical episodes.  Most likely focusing on the minimum and average values is most useful.
 
 Multiple audio languages set to default (if using -l)
 > Reported if different languages have the default flag set on audio tracks. For example, if some episodes have English and others have Japanese defaults. Not usually an issue.
