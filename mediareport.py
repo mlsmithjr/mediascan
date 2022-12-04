@@ -17,6 +17,7 @@ import yaml
 episode_pattern = re.compile(r"S(\d+)E(\d+)", re.IGNORECASE)
 episode_pattern_alt1 = re.compile(r"S(\d+)E(\d+)(-)(\d+)", re.IGNORECASE)
 episode_pattern_alt2 = re.compile(r"S(\d+)((?:E\d+)+)", re.IGNORECASE)
+episode_pattern_alt3 = re.compile(r"S(\d+)E(\d+)(-)E(\d+)", re.IGNORECASE)
 season_pattern = re.compile(r"Season\ (\d+)", re.IGNORECASE)
 show_pattern = re.compile(r"(/.+?)/Season\ \d+", re.IGNORECASE)
 name_pattern = re.compile(r"^/.*/(.+)$", re.IGNORECASE)
@@ -43,6 +44,15 @@ def sum_show(seasons: List[Item]) -> Dict:
 def extract_se(filename):
     # try spanning patterns (00-01)
     match = episode_pattern_alt1.search(filename)
+    if match and match.group(3) == "-":
+        s = match.group(1)
+        first = match.group(2)
+        last = match.group(4)
+#        last = re.compile(r"S\d+E\d+-(\d+)").search(filename).group(4)
+        return (int(s), [int(first), int(last)])
+
+    # try spanning patterns (E01-E02)
+    match = episode_pattern_alt3.search(filename)
     if match and match.group(3) == "-":
         s = match.group(1)
         first = match.group(2)
