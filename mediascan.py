@@ -7,7 +7,6 @@ import os
 import sys
 import re
 import timeit
-from jsonschema import validate
 from functools import cache
 from sqlalchemy import Column, ForeignKey, Integer, String, DateTime
 import sqlalchemy
