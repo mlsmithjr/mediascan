@@ -349,7 +349,7 @@ if __name__ == "__main__":
             print("running in refresh mode")
 
     ##
-    # load configuration and validate
+    # load configuration
     #
     with open("mediascan.yml", "r") as f:
         config = yaml.load(f, Loader=yaml.Loader)

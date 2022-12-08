@@ -8,7 +8,7 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy import create_engine
 from sqlalchemy import select
 from sqlalchemy.orm import Session, relationship, joinedload
-from mediascan import validate, Item, Audio, Path
+from mediascan import Item, Audio, Path
 import numpy as np
 import re
 import yaml
@@ -124,7 +124,7 @@ if __name__ == "__main__":
                 show_langdefaults = True
 
     ##
-    # load configuration and validate
+    # load configuration
     #
     with open("mediascan.yml", "r") as f:
         config = yaml.load(f, Loader=yaml.Loader)
