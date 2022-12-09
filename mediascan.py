@@ -26,6 +26,7 @@ FFPROBE_PATH="ffprobe"
 Base = declarative_base()
 
 SERIES_REGEX = re.compile(r"(.*)\.S(\d+)E(\d+)")
+show_pattern = re.compile(r".*/(.+?)/Season\ \d+", re.IGNORECASE)
 
     
 class Path(Base):
@@ -33,6 +34,7 @@ class Path(Base):
 
     id = Column(Integer, primary_key=True)
     filepath = Column(String(200), nullable=False, index=True)
+    title = Column(String(200), nullable=True)
     mediatype = Column(String(5), nullable=False)
 
 class Item(Base):
@@ -139,6 +141,10 @@ def fetch_or_create_dbpath(filepath: str, mediatype: str):
         thepath = Path()
         thepath.filepath = filepath
         thepath.mediatype = mediatype
+        match = show_pattern.search(filepath)
+        if match:
+            thepath.title = match.group(1)
+
     return thepath
     
 
