@@ -6,14 +6,14 @@ import subprocess
 import os
 import sys
 import re
-import timeit
 from functools import cache
-from sqlalchemy import Column, ForeignKey, Integer, String, DateTime
+from sqlalchemy import Column, ForeignKey, Integer, String, DateTime, inspect
 import sqlalchemy
 from sqlalchemy.orm import declarative_base, joinedload
 from sqlalchemy import create_engine
-from sqlalchemy import select
+from sqlalchemy import text
 from sqlalchemy.orm import Session, relationship
+
 from typing import Optional, Dict
 import yaml
 
@@ -44,8 +44,8 @@ class Item(Base):
     filename = Column(String(300), nullable=False, index=True)
     vcodec = Column(String(10), nullable=False)
     filesize_mb = Column(Integer)
-    height = Column(Integer)
-    width = Column(Integer)
+    height = Column(String(5))
+    width = Column(String(5))
     duration = Column(Integer)
     fps = Column(String(7))
     color_space = Column(String(15))
@@ -76,8 +76,24 @@ class Subtitle(Base):
     isdefault = Column(Integer)
     item = relationship("Item", back_populates="subtitle")
 
-
-
+##
+# Define some helpful views here. They aren't used in the code but they are in the DB to use for additional reporting, dashboards, etc as needed.
+##
+item_audio_view_sql = [
+    "CREATE VIEW item_audio_view AS ",
+    "SELECT item.id, path.title, path.filepath, path.mediatype, item.vcodec, item.filesize_mb, item.height, item.width, item.duration, item.fps, item.color_space, item.pix_format, item.last_modified, item.tag, item.filename, audio.codec AS audio_codec, audio.channel_layout, audio.lang ",
+    "FROM item ",
+    "JOIN path ON item.pathid = path.id ",
+    "JOIN audio ON audio.itemid = item.id"
+]
+item_subtitle_view_sql = [
+    "CREATE VIEW item_subtitle_view AS ",
+    "SELECT item.id, path.title, path.filepath, path.mediatype, item.vcodec, item.filesize_mb, item.height, item.width, item.duration, item.fps, item.color_space, item.pix_format, item.last_modified, item.tag, item.filename, subtitle.lang ",
+    "FROM item ",
+    "JOIN path ON item.pathid = path.id ",
+    "JOIN subtitle ON subtitle.itemid = item.id"
+]
+ 
 class MediaInfo:
     # pylint: disable=too-many-instance-attributes
 
@@ -305,7 +321,10 @@ def parse_ffmpeg_details_json(_path, info):
             audio['stream'] = str(stream['index'])
             audio['format'] = stream['codec_name']
             audio['default'] = 0
-            audio['channel_layout'] = stream.get('channel_layout', None)
+            chlayout = stream.get('channel_layout', None)
+            if not chlayout:
+                chlayout = str(stream.get('channels', 0)) + " channels"
+            audio['channel_layout'] = chlayout
             audio['bit_rate'] = stream.get('bit_rate', None)
             if 'disposition' in stream:
                 if 'default' in stream['disposition']:
@@ -380,6 +399,12 @@ if __name__ == "__main__":
     Base.metadata.create_all(engine)
 
     with Session(engine) as session:
+
+        if not inspect(engine).has_table("item_audio_view"):
+            session.execute(text(''.join(item_audio_view_sql)))
+
+        if not inspect(engine).has_table("item_subtitle_view"):
+            session.execute(text(''.join(item_subtitle_view_sql)))
     
         if mode == "refresh":
             # force everything to re-parse
