@@ -27,6 +27,7 @@ Base = declarative_base()
 
 SERIES_REGEX = re.compile(r"(.*)\.S(\d+)E(\d+)")
 show_pattern = re.compile(r".*/(.+?)/Season\ \d+", re.IGNORECASE)
+display_res = re.compile(r".*(480p|720p|1080p|1440p|2060p|4320p).*")
 
     
 class Path(Base):
@@ -53,6 +54,7 @@ class Item(Base):
     bit_rate = Column(Integer())
     last_modified = Column(DateTime)
     tag = Column(String(30))
+    display_res = Column(String(10))
     
     audio = relationship("Audio", back_populates="item", cascade="all, merge, delete-orphan", passive_deletes=True)
     subtitle = relationship("Subtitle", back_populates="item", cascade="all, merge, delete-orphan", passive_deletes=True)
@@ -117,6 +119,28 @@ class MediaInfo:
         self.audio = info['audio']
         self.subtitle = info['subtitle']
         self.bit_rate = info['bit_rate']
+        m = display_res.search(self.path)
+        if m:
+            self.display_res = m.group(1)
+        else:
+            if "DVD" in self.path:
+                if self.res_height > 500 and self.res_height < 600:
+                    # probably PAL DVD
+                    self.display_res = "576p"
+                elif self.res_height > 400 and self.res_height < 500:
+                    self.display_res = "480p"
+                else:
+                    self.display_res = "other"
+            elif "SDTV" in self.path:
+                if self.res_height > 500 and self.res_height < 600:
+                    # probably PAL 
+                    self.display_res = "576i"
+                elif self.res_height > 400 and self.res_height < 500:
+                    self.display_res = "480i"
+                else:
+                    self.display_res = "other"
+            else:
+                self.display_res = "other"
 
     def default_audio(self) -> Optional[Dict]:
         if len(self.audio) == 1:
@@ -208,6 +232,7 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict):
             item.bit_rate = info.bit_rate
             item.last_modified = get_filemodtime(p)
             item.tag = match_tag(p, path)
+            item.display_res = info.display_res
             
         else:
             item = Item()
@@ -231,6 +256,8 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict):
             item.pix_format = info.pix_fmt
             item.duration = info.runtime
             item.bit_rate = info.bit_rate
+            item.display_res = info.display_res
+
             item.last_modified = get_filemodtime(p)
             item.tag = match_tag(p, path)
             session.add(item)

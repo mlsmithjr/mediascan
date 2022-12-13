@@ -225,7 +225,7 @@ if __name__ == "__main__":
                         continue
 
                     codecs.add(item.vcodec)
-                    res.add(item.width)
+                    res.add(item.display_res)
                     src.add(extract_src(item.filename))
 
                 #
