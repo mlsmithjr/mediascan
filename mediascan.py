@@ -40,7 +40,7 @@ class Path(Base):
 class Item(Base):
     __tablename__ = "item"
     id = Column(Integer, primary_key=True)
-    pathid = Column(Integer, ForeignKey("path.id"), nullable=False)
+    pathid = Column(Integer, ForeignKey("path.id", ondelete='CASCADE'), nullable=False)
     filename = Column(String(300), nullable=False, index=True)
     vcodec = Column(String(10), nullable=False)
     filesize_mb = Column(Integer)
@@ -50,29 +50,31 @@ class Item(Base):
     fps = Column(String(7))
     color_space = Column(String(15))
     pix_format = Column(String(15))
+    bit_rate = Column(Integer())
     last_modified = Column(DateTime)
     tag = Column(String(30))
     
-    audio = relationship("Audio", back_populates="item", cascade="all, merge, delete-orphan")
-    subtitle = relationship("Subtitle", back_populates="item", cascade="all, merge, delete-orphan")
+    audio = relationship("Audio", back_populates="item", cascade="all, merge, delete-orphan", passive_deletes=True)
+    subtitle = relationship("Subtitle", back_populates="item", cascade="all, merge, delete-orphan", passive_deletes=True)
     path = relationship("Path")
 
 class Audio(Base):
     __tablename__ = "audio"
     id = Column(Integer, primary_key=True)
-    itemid = Column(Integer, ForeignKey("item.id"), nullable=False)
+    itemid = Column(Integer, ForeignKey("item.id", ondelete='CASCADE'), nullable=False)
     lang = Column(String(10), index=True)
     codec = Column(String(15), index=True)
     channel_layout = Column(String(15))
+    bit_rate = Column(Integer())
     isdefault = Column(Integer)
     item = relationship("Item", back_populates="audio")
 
 class Subtitle(Base):
     __tablename__ = "subtitle"
     id = Column(Integer, primary_key=True)
-    itemid = Column(Integer, ForeignKey("item.id"), nullable=False)
+    itemid = Column(Integer, ForeignKey("item.id", ondelete='CASCADE'), nullable=False)
     lang = Column(String(10), index=True)
-    format = Column(String(15))
+    format = Column(String(30))
     isdefault = Column(Integer)
     item = relationship("Item", back_populates="subtitle")
 
@@ -81,7 +83,7 @@ class Subtitle(Base):
 ##
 item_audio_view_sql = [
     "CREATE VIEW item_audio_view AS ",
-    "SELECT item.id, path.title, path.filepath, path.mediatype, item.vcodec, item.filesize_mb, item.height, item.width, item.duration, item.fps, item.color_space, item.pix_format, item.last_modified, item.tag, item.filename, audio.codec AS audio_codec, audio.channel_layout, audio.lang ",
+    "SELECT item.id, path.title, path.filepath, path.mediatype, item.vcodec, item.filesize_mb, item.height, item.width, item.duration, item.bit_rate as v_bitrate, item.fps, item.color_space, item.pix_format, item.last_modified, item.tag, item.filename, audio.codec AS audio_codec, audio.channel_layout, audio.bit_rate as a_bitrate, audio.lang ",
     "FROM item ",
     "JOIN path ON item.pathid = path.id ",
     "JOIN audio ON audio.itemid = item.id"
@@ -114,6 +116,7 @@ class MediaInfo:
         self.pix_fmt = info['pix_fmt']
         self.audio = info['audio']
         self.subtitle = info['subtitle']
+        self.bit_rate = info['bit_rate']
 
     def default_audio(self) -> Optional[Dict]:
         if len(self.audio) == 1:
@@ -202,6 +205,7 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict):
             item.color_space = info.color_space
             item.pix_format = info.pix_fmt
             item.duration = info.runtime
+            item.bit_rate = info.bit_rate
             item.last_modified = get_filemodtime(p)
             item.tag = match_tag(p, path)
             
@@ -226,6 +230,7 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict):
             item.color_space = info.color_space
             item.pix_format = info.pix_fmt
             item.duration = info.runtime
+            item.bit_rate = info.bit_rate
             item.last_modified = get_filemodtime(p)
             item.tag = match_tag(p, path)
             session.add(item)
@@ -237,7 +242,7 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict):
             audio[0]['default'] = 1
 
         for a in audio:
-            a = Audio(lang=a['lang'], codec=a['format'], channel_layout=a['channel_layout'], isdefault=a['default'])
+            a = Audio(lang=a['lang'], codec=a['format'], channel_layout=a['channel_layout'], isdefault=a['default'], bit_rate=a['bit_rate'])
             item.audio.append(a)
 
         for s in info.subtitle:
@@ -302,6 +307,9 @@ def parse_ffmpeg_details_json(_path, info):
             fr = int(int(fr_parts[0]) / int(fr_parts[1]))
             minfo['fps'] = str(fr)
             minfo['color_space'] = stream.get('color_space', None)
+            minfo['bit_rate'] = stream.get('bit_rate', None)
+            if minfo['bit_rate']:
+                minfo['bit_rate'] = int(int(minfo['bit_rate']) / 1024)
             minfo['pix_fmt'] = stream['pix_fmt']
             if 'duration' in stream:
                 minfo['runtime'] = int(float(stream['duration']) / 60)  # convert to whole minutes
@@ -313,6 +321,8 @@ def parse_ffmpeg_details_json(_path, info):
                             duration = (int(float(hh)) * 60) + (int(float(mm)))  # * 60) + int(float(ss))
                             minfo['runtime'] = duration
                             break
+                        if name == 'BPS' and minfo['bit_rate'] == None:
+                            minfo['bit_rate'] = int(int(value) / 1024)
             if "tags" in stream and "language" in stream["tags"]:
                 default_lang = stream["tags"]["language"]
 
@@ -325,6 +335,8 @@ def parse_ffmpeg_details_json(_path, info):
             if not chlayout:
                 chlayout = str(stream.get('channels', 0)) + " channels"
             audio['channel_layout'] = chlayout
+            audio['bit_rate'] = stream.get('bit_rate')
+
             audio['bit_rate'] = stream.get('bit_rate', None)
             if 'disposition' in stream:
                 if 'default' in stream['disposition']:

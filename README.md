@@ -125,6 +125,7 @@ My Messed Up Show:
     Season 1
       Mixture of pixel formats: {'yuv420p10le', 'yuv420p'}
       Inconsistent file sizes (stddev=579, min=577, max=2690), avg=2132
+      Inconsistent bit rates (stddev=747, min=878, max=2597), avg=1536
       Resolutions: {808, 1080}
       Missing: 5,8
     Season 2
@@ -150,6 +151,9 @@ Resolutions
 
 Inconsistent file sizes
 > This is a best-guess detection of potential quality inconsistencies. The reported numbers are standard deviation, minimum, maximum, and average. This only shows up if the formula is triggered, which is currently: **((stddev / avg) * 100) > 40.0**. Often this is a false positive because several factors could account for file size gaps, such as a mix of h264- and h265-encoded episodes, double-length episodes, or shorter than typical episodes.  Most likely focusing on the minimum and average values is most useful.
+
+Inconsistent bit rates
+> Like file sizes above, this is a best-guess estimate that the video bitrates of the content are wildly dissimilar and could lead to inconsistent viewing quality.
 
 Multiple audio languages set to default (if using -l)
 > Reported if different languages have the default flag set on audio tracks. For example, if some episodes have English and others have Japanese defaults. Not usually an issue.
