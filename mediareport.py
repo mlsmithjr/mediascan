@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import traceback
 from typing import Dict, List, Optional
 from sqlalchemy import Column, ForeignKey, Integer, String, DateTime
 import sqlalchemy
@@ -93,7 +94,7 @@ def mixed_sources(sources):
     return False
 
 def details_header() -> str:
-    return f"   {'Episode':65} {'Dur':>7} {'Size(mb)':>8} {'FPS':>5} {'Resolution'} {'Color':>10} {'Pixel Fmt':>12}"
+    return f"   {'Episode':65} {'Dur':>7} {'Size(mb)':>8} {'FPS':>5} {'Bit Rate'} {'Resolution'} {'Color':>10} {'Pixel Fmt':>12}"
 
 def details(item: Item) -> str:
     match = trunc_pattern.search(item.filename)
@@ -101,7 +102,7 @@ def details(item: Item) -> str:
         partial = match.group(1)
     else:
         partial = item.filename
-    details = f"   {partial:65} {item.duration:>7} {item.filesize_mb:>8} {item.fps:>5} {item.width:>5}x{item.height:<4} {item.color_space or '':>10} {item.pix_format:>12}"
+    details = f"   {partial:65} {item.duration:>7} {item.filesize_mb:>8} {item.fps:>5} {item.bit_rate or 0:>8} {item.width:>5}x{item.height:<4} {item.color_space or '':>10} {item.pix_format:>12}"
     return details
 
 #
@@ -173,6 +174,7 @@ if __name__ == "__main__":
 
                 eplist = []
                 sizes = []
+                bitrates = []
                 codecs = set()
                 oop = []
                 res = set()
@@ -189,9 +191,8 @@ if __name__ == "__main__":
                 if not items:
                     continue
 
-                stats[path] = { "avg": 0, "src": set(), "res": set(), "vcodecs": set() }
+                stats[path] = { "avg": 0, "src": set(), "res": set(), "vcodecs": set(), "pixformats": set() }
                     
-
                 if show_details:
                     detailsfile.write(f"{path}:\n")
 
@@ -207,9 +208,9 @@ if __name__ == "__main__":
                                 alang.add(a.lang)
                             clayouts.add(a.channel_layout)
                     
-                    # filesizes
                     sizes.append(item.filesize_mb)
-                    
+                    if item.bit_rate:
+                        bitrates.append(item.bit_rate)
                     pixf.add(item.pix_format)
                     
                     # season and episode numbers
@@ -231,11 +232,27 @@ if __name__ == "__main__":
                 # store details
                 #
                 stats[path]["season"] = season   
+                
+                # file sizes
                 stats[path]["std"] = int(np.std(sizes))
                 stats[path]["max"] = np.max(sizes)
                 stats[path]["min"] = np.min(sizes)
                 stats[path]["avg"] = int(np.average(sizes))
 
+                # bitrates
+                if len(bitrates):
+                    stats[path]["bitstd"] = int(np.std(bitrates))
+                    stats[path]["bitmax"] = np.max(bitrates)
+                    stats[path]["bitmin"] = np.min(bitrates)
+                    stats[path]["bitavg"] = int(np.average(bitrates))
+                else:
+                    stats[path]["bitstd"] = 0
+                    stats[path]["bitmax"] = 0
+                    stats[path]["bitmin"] = 0
+                    stats[path]["bitavg"] = 0
+                    
+
+                # the rest
                 mxe = np.max(eplist)
                 egaps = set([e for e in range(1, mxe)]).difference(eplist)
                 stats[path]["egaps"] = [str(gap) for gap in egaps]
@@ -249,11 +266,12 @@ if __name__ == "__main__":
                 stats[path]["pixformats"] = pixf
                 
             except Exception as ex:
+#                traceback.print_exc()
                 print(ex)
                 print(f"** Unexpected error processing {path} -- skipping")            
 
         #
-        # make a list of show titles
+        # make a list of show titles and do the analysis
         #
         
         shows = set()
@@ -272,10 +290,11 @@ if __name__ == "__main__":
             if name in media_options:
                 opts = media_options[name]
                 if opts.get("locked", False):
-                    # user has indicated the show is locked and just ignore it
+                    # user has indicated the show is locked so just ignore it
                     print(f"{name} (locked)")
                     continue
             else:
+                # must be a new show so add a placeholder
                 media_options[name] = { "locked": False }
             
             print(f"{name}:")
@@ -310,6 +329,11 @@ if __name__ == "__main__":
                 else:
                     print(f"Unexpected missing data in {show}, Season {season['season']} - skipped")
                     continue
+                
+                if "bitstd" in season and season["bitstd"] > 0:
+                    threshold = (season["bitstd"] / season["bitavg"]) * 100
+                    if season["bitstd"] > season["bitmin"] or threshold > 40.0:
+                        report += f"     Inconsistent bit rates (stddev={season['bitstd']}, min={season['bitmin']}, max={season['bitmax']}), avg={season['bitavg']}\n"
                 
                 if show_langdefaults and "alang" in season and len(season["alang"]) > 1:
                     report += f"     Multiple audio languages set to default: {season['alang']}\n"
