@@ -55,6 +55,7 @@ class Item(Base):
     last_modified = Column(DateTime)
     tag = Column(String(30))
     display_res = Column(String(10))
+    mediatype = Column(String(5), nullable=False)
     
     audio = relationship("Audio", back_populates="item", cascade="all, merge, delete-orphan", passive_deletes=True)
     subtitle = relationship("Subtitle", back_populates="item", cascade="all, merge, delete-orphan", passive_deletes=True)
@@ -233,6 +234,7 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict):
             item.last_modified = get_filemodtime(p)
             item.tag = match_tag(p, path)
             item.display_res = info.display_res
+            item.mediatype = path["type"]
             
         else:
             item = Item()
@@ -257,6 +259,7 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict):
             item.duration = info.runtime
             item.bit_rate = info.bit_rate
             item.display_res = info.display_res
+            item.mediatype = path["type"]
 
             item.last_modified = get_filemodtime(p)
             item.tag = match_tag(p, path)
