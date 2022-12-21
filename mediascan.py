@@ -296,12 +296,14 @@ def dig(path: Dict):
                 try:
                     p = os.path.join(root, file)
                     
-                    if p in existing_files:
+                    existing_file = existing_files.pop(p, None)
+                    if existing_file:
 
                         # make sure it was changed before we reprocess
 
                         last_mod = get_filemodtime(p)
-                        db_last_mod = existing_files[p].last_modified
+                        db_last_mod = existing_file.last_modified
+
                         if last_mod == db_last_mod:
                             continue
                     
@@ -467,6 +469,7 @@ if __name__ == "__main__":
                 dig(path)
 
         # finally, purge any records in the database whose file no longer exists
+        # whatever is remaining in existing_files will probably be missing (removed).
         for p, item in existing_files.items():
             if not os.path.exists(p):
                 session.delete(item)
