@@ -26,7 +26,8 @@ FFPROBE_PATH="ffprobe"
 Base = declarative_base()
 
 SERIES_REGEX = re.compile(r"(.*)\.S(\d+)E(\d+)")
-show_pattern = re.compile(r".*/(.+?)/Season\ \d+", re.IGNORECASE)
+season_pattern = re.compile(r".*/(.+?)/Season\ \d+", re.IGNORECASE)
+specials_pattern = re.compile(r".*/(.+?)/Specials", re.IGNORECASE)
 display_res = re.compile(r".*(480p|720p|1080p|1440p|2060p|4320p).*")
 
     
@@ -185,9 +186,13 @@ def fetch_or_create_dbpath(filepath: str, mediatype: str):
         thepath = Path()
         thepath.filepath = filepath
         thepath.mediatype = mediatype
-        match = show_pattern.search(filepath)
+        match = season_pattern.search(filepath)
         if match:
             thepath.title = match.group(1)
+        else:
+            match = specials_pattern.search(filepath)
+            if match:
+                thepath.title = match.group(1)
 
     return thepath
     
