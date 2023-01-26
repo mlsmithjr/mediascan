@@ -203,7 +203,7 @@ def match_tag(p: str, path: Dict):
             return tag["tag"]
     return None
 
-def store(root: str, filename: str, info: MediaInfo, path: Dict):
+def store(root: str, filename: str, info: MediaInfo, path: Dict, existing_file = None):
     global session
 
     audio = info.audio
@@ -212,9 +212,9 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict):
     else:
         itemid = -1
         p = os.path.join(root, filename)
-        if p in existing_files:
-            itemid = existing_files[p].id
-            dbpath = existing_files[p].path
+        if existing_file:
+            itemid = existing_file.id
+            dbpath = existing_file.path
             
         if itemid != -1:
             item = session.get(Item, itemid)
@@ -293,6 +293,7 @@ def dig(path: Dict):
             if file.startswith(".") or os.path.isdir(file):
                 continue
             if file[-4:] in EXTENSIONS:
+                existing_file = None
                 try:
                     p = os.path.join(root, file)
                     
@@ -310,7 +311,7 @@ def dig(path: Dict):
                     info = getinfo(p)
                     if info.valid:
                         print(f"  {file}")
-                        store(root, file, info, path)
+                        store(root, file, info, path, existing_file)
                 except Exception as ex:
     #                print(" " + os.path.join(root, file))
                     print(file)
