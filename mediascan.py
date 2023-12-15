@@ -8,7 +8,6 @@ import sys
 import re
 from functools import cache
 from sqlalchemy import Column, ForeignKey, Integer, String, DateTime, inspect
-import sqlalchemy
 from sqlalchemy.orm import declarative_base, joinedload
 from sqlalchemy import create_engine
 from sqlalchemy import text
@@ -30,7 +29,7 @@ season_pattern = re.compile(r".*/(.+?)/Season\ \d+", re.IGNORECASE)
 specials_pattern = re.compile(r".*/(.+?)/Specials", re.IGNORECASE)
 display_res = re.compile(r".*(480p|720p|1080p|1440p|2060p|4320p).*")
 
-    
+
 class Path(Base):
     __tablename__ = "path"
 
@@ -57,7 +56,7 @@ class Item(Base):
     tag = Column(String(30))
     display_res = Column(String(10))
     mediatype = Column(String(5), nullable=False)
-    
+
     audio = relationship("Audio", back_populates="item", cascade="all, merge, delete-orphan", passive_deletes=True)
     subtitle = relationship("Subtitle", back_populates="item", cascade="all, merge, delete-orphan", passive_deletes=True)
     path = relationship("Path")
@@ -99,7 +98,7 @@ item_subtitle_view_sql = [
     "JOIN path ON item.pathid = path.id ",
     "JOIN subtitle ON subtitle.itemid = item.id"
 ]
- 
+
 class MediaInfo:
     # pylint: disable=too-many-instance-attributes
 
@@ -135,7 +134,7 @@ class MediaInfo:
                     self.display_res = "other"
             elif "SDTV" in self.path:
                 if self.res_height > 500 and self.res_height < 600:
-                    # probably PAL 
+                    # probably PAL
                     self.display_res = "576i"
                 elif self.res_height > 400 and self.res_height < 500:
                     self.display_res = "480i"
@@ -195,7 +194,7 @@ def fetch_or_create_dbpath(filepath: str, mediatype: str):
                 thepath.title = match.group(1)
 
     return thepath
-    
+
 
 def match_tag(p: str, path: Dict):
 
@@ -220,7 +219,7 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict, existing_file =
         if existing_file:
             itemid = existing_file.id
             dbpath = existing_file.path
-            
+
         if itemid != -1:
             item = session.get(Item, itemid)
             item.audio.clear()
@@ -240,7 +239,7 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict, existing_file =
             item.tag = match_tag(p, path)
             item.display_res = info.display_res
             item.mediatype = path["type"]
-            
+
         else:
             item = Item()
 
@@ -301,7 +300,7 @@ def dig(path: Dict):
                 existing_file = None
                 try:
                     p = os.path.join(root, file)
-                    
+
                     existing_file = existing_files.pop(p, None)
                     if existing_file:
 
@@ -312,7 +311,7 @@ def dig(path: Dict):
 
                         if last_mod == db_last_mod:
                             continue
-                    
+
                     info = getinfo(p)
                     if info.valid:
                         print(f"  {file}")
@@ -321,7 +320,7 @@ def dig(path: Dict):
     #                print(" " + os.path.join(root, file))
                     print(file)
                     raise ex
-                
+
         session.commit()
 
 def parse_ffmpeg_details_json(_path, info):
@@ -330,7 +329,7 @@ def parse_ffmpeg_details_json(_path, info):
     if 'streams' not in info:
         return minone
     video_found = False
-   
+
     default_lang = "???"
     for stream in info['streams']:
         if stream['codec_type'] == 'video' and not video_found:
@@ -374,6 +373,8 @@ def parse_ffmpeg_details_json(_path, info):
                 chlayout = str(stream.get('channels', 0)) + " channels"
             audio['channel_layout'] = chlayout
             audio['bit_rate'] = stream.get('bit_rate')
+            if 'duration' in stream and 'runtime' not in minfo:
+                minfo['runtime'] = int(float(stream['duration']) / 60)  # convert to whole minutes
 
             audio['bit_rate'] = stream.get('bit_rate', None)
             if 'disposition' in stream:
@@ -395,6 +396,9 @@ def parse_ffmpeg_details_json(_path, info):
             sub['stream'] = str(stream['index'])
             sub['format'] = stream.get('codec_name', None)
             sub['default'] = 0
+            if 'duration' in stream and 'runtime' not in minfo:
+                minfo['runtime'] = int(float(stream['duration']) / 60)  # convert to whole minutes
+
             if 'disposition' in stream:
                 if 'default' in stream['disposition']:
                     sub['default'] = stream['disposition']['default']
@@ -441,7 +445,7 @@ if __name__ == "__main__":
     if len(paths) == 0:
         print("No paths defined to scan")
         sys.exit(0)
-        
+
     ##
     # connect to database and create tables, if missing
     #
@@ -455,7 +459,7 @@ if __name__ == "__main__":
 
         if not inspect(engine).has_table("item_subtitle_view"):
             session.execute(text(''.join(item_subtitle_view_sql)))
-    
+
         if mode == "refresh":
             # force everything to re-parse
             existing_files = dict()
@@ -468,7 +472,7 @@ if __name__ == "__main__":
 
             for result in results:
                 existing_files[os.path.join(result.path.filepath, result.filename)] =  result
-        
+
         for path in paths:
             if path.get("enabled", True):
                 print(path["path"])
@@ -486,7 +490,7 @@ if __name__ == "__main__":
                 session.delete(dir)
 
         session.commit()
-    
+
     engine.dispose()
 
 
