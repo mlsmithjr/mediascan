@@ -23,8 +23,11 @@ Mediacan will scan all indicated paths for known media files, probe them for det
 
 **install**
 
-1. Clone this repo.
-2. Install dependencies with `pip3 install --user -r requirements.txt`
+1. Clone this repo ```git clone https://github.com/mlsmithjr/mediascan.git```
+2. ```cd mediascan```
+3. Setup a virtual environment: ```python3 -m venv venv```
+4. Activate the virtual environment: ```. venv/bin/activate```
+5. Install requirements packages: ```pip3 install -r requirements.txt```
 
 ---
 **configuration**
@@ -96,6 +99,8 @@ database:
 
 Run:
 ```
+cd <your mediascan directory>
+. venv/bin/activate
 python3 mediascan.py
 ```
 This will start the scan.  You will see each item as it is being processed. If you have a large collection it may take quite a while to finish.  This is because it is reading the header of each file to get technical details out for the analysis.  
