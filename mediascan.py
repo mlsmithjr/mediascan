@@ -6,6 +6,7 @@ import subprocess
 import os
 import sys
 import re
+from typing import Optional, Dict
 from functools import cache
 from sqlalchemy import Column, ForeignKey, Integer, String, DateTime, inspect
 from sqlalchemy.orm import declarative_base, joinedload
@@ -13,14 +14,11 @@ from sqlalchemy import create_engine
 from sqlalchemy import text
 from sqlalchemy.orm import Session, relationship
 
-from typing import Optional, Dict
 import yaml
-
-
 
 EXTENSIONS = [".mkv", ".mp4", ".avi", ".m4v"]
 
-FFPROBE_PATH="ffprobe"
+FFPROBE_PATH = "ffprobe"
 
 Base = declarative_base()
 
@@ -28,6 +26,8 @@ SERIES_REGEX = re.compile(r"(.*)\.S(\d+)E(\d+)")
 season_pattern = re.compile(r".*/(.+?)/Season\ \d+", re.IGNORECASE)
 specials_pattern = re.compile(r".*/(.+?)/Specials", re.IGNORECASE)
 display_res = re.compile(r".*(480p|720p|1080p|1440p|2060p|4320p).*")
+
+mode = "add"
 
 
 class Path(Base):
@@ -37,6 +37,7 @@ class Path(Base):
     filepath = Column(String(200), nullable=False, index=True)
     title = Column(String(200), nullable=True)
     mediatype = Column(String(5), nullable=False)
+
 
 class Item(Base):
     __tablename__ = "item"
@@ -58,8 +59,10 @@ class Item(Base):
     mediatype = Column(String(5), nullable=False)
 
     audio = relationship("Audio", back_populates="item", cascade="all, merge, delete-orphan", passive_deletes=True)
-    subtitle = relationship("Subtitle", back_populates="item", cascade="all, merge, delete-orphan", passive_deletes=True)
+    subtitle = relationship("Subtitle", back_populates="item", cascade="all, merge, delete-orphan",
+                            passive_deletes=True)
     path = relationship("Path")
+
 
 class Audio(Base):
     __tablename__ = "audio"
@@ -72,6 +75,7 @@ class Audio(Base):
     isdefault = Column(Integer)
     item = relationship("Item", back_populates="audio")
 
+
 class Subtitle(Base):
     __tablename__ = "subtitle"
     id = Column(Integer, primary_key=True)
@@ -80,6 +84,7 @@ class Subtitle(Base):
     format = Column(String(30))
     isdefault = Column(Integer)
     item = relationship("Item", back_populates="subtitle")
+
 
 ##
 # Define some helpful views here. They aren't used in the code but they are in the DB to use for additional reporting, dashboards, etc as needed.
@@ -98,6 +103,7 @@ item_subtitle_view_sql = [
     "JOIN path ON item.pathid = path.id ",
     "JOIN subtitle ON subtitle.itemid = item.id"
 ]
+
 
 class MediaInfo:
     # pylint: disable=too-many-instance-attributes
@@ -161,7 +167,7 @@ class MediaInfo:
         return f"{self.path}, {self.vcodec=}, {self.stream=}, {self.res_width}x{self.res_height}, {self.runtime_str()=}, {self.audio=}"
 
 
-def get_filemodtime(p : str):
+def get_filemodtime(p: str):
     mtime = os.path.getmtime(p)
     return datetime.datetime.fromtimestamp(mtime)
 
@@ -173,10 +179,12 @@ def getinfo(filepath: str):
         info = json.loads(output)
         return parse_ffmpeg_details_json(filepath, info)
 
+
 @cache
 def compiled_pattern(pattern: str) -> Optional[re.Pattern]:
     r = re.compile(pattern)
     return r
+
 
 @cache
 def fetch_or_create_dbpath(filepath: str, mediatype: str):
@@ -197,7 +205,6 @@ def fetch_or_create_dbpath(filepath: str, mediatype: str):
 
 
 def match_tag(p: str, path: Dict):
-
     if "tags" not in path:
         return None
 
@@ -207,7 +214,8 @@ def match_tag(p: str, path: Dict):
             return tag["tag"]
     return None
 
-def store(root: str, filename: str, info: MediaInfo, path: Dict, existing_file = None):
+
+def store(root: str, filename: str, info: MediaInfo, apath: Dict, existing_file=None):
     global session
 
     audio = info.audio
@@ -236,14 +244,14 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict, existing_file =
             item.duration = info.runtime
             item.bit_rate = info.bit_rate
             item.last_modified = get_filemodtime(p)
-            item.tag = match_tag(p, path)
+            item.tag = match_tag(p, apath)
             item.display_res = info.display_res
-            item.mediatype = path["type"]
+            item.mediatype = apath["type"]
 
         else:
             item = Item()
 
-            thepath = fetch_or_create_dbpath(root, path["type"])
+            thepath = fetch_or_create_dbpath(root, apath["type"])
             # if not thepath:
             #     thepath = Path()
             #     item.path = thepath
@@ -263,36 +271,37 @@ def store(root: str, filename: str, info: MediaInfo, path: Dict, existing_file =
             item.duration = info.runtime
             item.bit_rate = info.bit_rate
             item.display_res = info.display_res
-            item.mediatype = path["type"]
+            item.mediatype = apath["type"]
 
             item.last_modified = get_filemodtime(p)
-            item.tag = match_tag(p, path)
+            item.tag = match_tag(p, apath)
             session.add(item)
 
-###        session.flush()
+        ###        session.flush()
 
         # make sure there is always a default audio track
         if len(audio) == 1:
             audio[0]['default'] = 1
 
         for a in audio:
-            a = Audio(lang=a['lang'], codec=a['format'], channel_layout=a['channel_layout'], isdefault=a['default'], bit_rate=a['bit_rate'])
+            a = Audio(lang=a['lang'], codec=a['format'], channel_layout=a['channel_layout'], isdefault=a['default'],
+                      bit_rate=a['bit_rate'])
             item.audio.append(a)
 
         for s in info.subtitle:
             s = Subtitle(lang=s['lang'], format=s['format'], isdefault=s['default'])
             item.subtitle.append(s)
 
-#        session.merge(item)
+        #        session.merge(item)
         session.flush()
 
 
-def dig(path: Dict):
+def dig(apath: Dict):
     global mode
 
-    root = path["path"]
+    root = apath["path"]
 
-    for root, subdir, files in os.walk(root):
+    for root, _, files in os.walk(root):
         for file in files:
             if file.startswith(".") or os.path.isdir(file):
                 continue
@@ -303,7 +312,6 @@ def dig(path: Dict):
 
                     existing_file = existing_files.pop(p, None)
                     if existing_file:
-
                         # make sure it was changed before we reprocess
 
                         last_mod = get_filemodtime(p)
@@ -317,11 +325,12 @@ def dig(path: Dict):
                         print(f"  {file}")
                         store(root, file, info, path, existing_file)
                 except Exception as ex:
-    #                print(" " + os.path.join(root, file))
+                    #                print(" " + os.path.join(root, file))
                     print(file)
                     raise ex
 
         session.commit()
+
 
 def parse_ffmpeg_details_json(_path, info):
     minone = MediaInfo(None)
@@ -339,7 +348,7 @@ def parse_ffmpeg_details_json(_path, info):
             minfo['stream'] = str(stream['index'])
             minfo['res_width'] = stream['width']
             minfo['res_height'] = stream['height']
-            minfo['filesize_mb'] =int(os.path.getsize(_path) / (1024 * 1024))
+            minfo['filesize_mb'] = int(os.path.getsize(_path) / (1024 * 1024))
             fr_parts = stream['r_frame_rate'].split('/')
             fr = int(int(fr_parts[0]) / int(fr_parts[1]))
             minfo['fps'] = str(fr)
@@ -354,7 +363,7 @@ def parse_ffmpeg_details_json(_path, info):
                 if 'tags' in stream:
                     for name, value in stream['tags'].items():
                         if name[0:8] == 'DURATION':
-                            hh, mm, ss = value.split(':')
+                            hh, mm, _ = value.split(':')
                             duration = (int(float(hh)) * 60) + (int(float(mm)))  # * 60) + int(float(ss))
                             minfo['runtime'] = duration
                             break
@@ -420,8 +429,6 @@ if __name__ == "__main__":
 
     global engine, session, existing_files, mode
 
-    mode = "add"
-
     if len(sys.argv) > 1:
         if sys.argv[1] == "--refresh":
             mode = "refresh"
@@ -462,16 +469,16 @@ if __name__ == "__main__":
 
         if mode == "refresh":
             # force everything to re-parse
-            existing_files = dict()
+            existing_files = {}
         else:
             # load all existing files and database IDs in advance to speed things up
-            existing_files = dict()
-#            stmt = select(Item)
-#            results = session.scalars(stmt)
+            existing_files = {}
+            #            stmt = select(Item)
+            #            results = session.scalars(stmt)
             results = session.query(Item).options(joinedload(Item.path)).all()
 
             for result in results:
-                existing_files[os.path.join(result.path.filepath, result.filename)] =  result
+                existing_files[os.path.join(result.path.filepath, result.filename)] = result
 
         for path in paths:
             if path.get("enabled", True):
@@ -485,12 +492,10 @@ if __name__ == "__main__":
                 session.delete(item)
                 print(f"removed {p} from database")
         # and purge missing folders from DB
-        for dir in session.query(Path).all():
-            if not os.path.exists(dir.filepath):
-                session.delete(dir)
+        for directory in session.query(Path).all():
+            if not os.path.exists(directory.filepath):
+                session.delete(directory)
 
         session.commit()
 
     engine.dispose()
-
-

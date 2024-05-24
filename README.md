@@ -57,7 +57,7 @@ You only need 1 database connection given.  There are 2 provided here to show al
 | **connect**  | This is the SQLAlchemy-compatible connection to your database. All you need is the connection string here any any optional driver installed to support it. |
 | **enabled** | _true_ or _false_, good to test with alternate databases without rewriting config. |
 
-*    *sqlite:///mediascan.db* will store the database in the current directory.
+*    *sqlite:///mediascan.db* will store the database in the current directory. Go with this option if you are just trying out the software.
 
 *    *sqlite:////foo/bar/mediascan.db* will store the database in the /foo/bar 
 directory.
